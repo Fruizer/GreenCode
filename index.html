@@ -3,116 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenCompute | Energy Analyzer</title>
+    <title>GreenCode | Energy Analyzer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="app.js" defer></script>
     <style>
-        #bgVideo { position: fixed; top: 50%; left: 50%; min-width: 100%; min-height: 100%; width: auto; height: auto; z-index: -100; transform: translate(-50%, -50%); object-fit: cover; }
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.25); z-index: -90; }
-        .glass-card { background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #10b981; border-radius: 10px; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #10b981; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        /* Tab hiding class */
+        body { background-color: #d1d5db; } 
+        .glass-card { background: rgba(255, 255, 255, 0.95); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .dropzone-active { border-color: #10b981 !important; background-color: #ecfdf5 !important; }
         .tab-hidden { display: none !important; }
     </style>
 </head>
-<body class="font-sans min-h-screen selection:bg-emerald-200 text-gray-800">
+<body class="font-sans min-h-screen text-gray-800">
 
-    <video autoplay muted loop playsinline id="bgVideo">
-        <source src="nature.mp4" type="video/mp4">
-    </video>
-    <div class="overlay"></div>
-
-    <nav class="bg-emerald-800/90 backdrop-blur-md p-4 text-white shadow-lg sticky top-0 z-50">
+    <nav class="bg-[#115e59] p-4 text-white shadow-md sticky top-0 z-50">
         <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold tracking-tight">GreenCode <span class="text-emerald-400 font-light italic">by GILBERTO Systems</span></h1>
-            
+            <h1 class="text-xl font-bold tracking-tight">GreenCode <span class="text-emerald-300 font-light italic">By GILBERTO Systems</span></h1>
             <div class="flex gap-6 font-bold text-xs uppercase tracking-widest">
-                <button onclick="switchTab('analyzer')" id="nav-analyzer" class="text-emerald-300 hover:text-white border-b-2 border-emerald-300 transition-all">Analyzer</button>
-                <button onclick="switchTab('history')" id="nav-history" class="text-white/60 hover:text-white border-b-2 border-transparent hover:border-white transition-all">My History</button>
-                <button onclick="switchTab('profile')" id="nav-profile" class="text-white/60 hover:text-white border-b-2 border-transparent hover:border-white transition-all">Profile</button>
+                <button onclick="switchTab('analyzer')" id="nav-analyzer" class="text-emerald-300 border-b-2 border-emerald-300">Analyzer</button>
+                <button onclick="switchTab('history')" id="nav-history" class="text-white/60 hover:text-white transition-colors">My History</button>
+                <button onclick="switchTab('profile')" id="nav-profile" class="text-white/60 hover:text-white transition-colors">Profile</button>
             </div>
-
             <div class="flex items-center gap-4">
+                <button onclick="forceStopWorkers()" id="forceStopBtn" class="hidden bg-red-500 hover:bg-red-400 text-white font-black text-[10px] px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg animate-pulse">Force Stop</button>
+                
                 <div id="engineStatus" class="flex items-center gap-2 px-3 py-1 bg-emerald-900 rounded-full">
-                    <div class="loader" id="engineLoader"></div>
-                    <span id="statusIndicator" class="text-[10px] text-emerald-300 font-black tracking-widest uppercase">Booting...</span>
+                    <span id="statusIndicator" class="text-[10px] text-emerald-300 font-black tracking-widest uppercase">SYSTEM IDLE</span>
                 </div>
                 <button onclick="logoutUser()" class="text-[10px] bg-red-600 hover:bg-red-700 px-3 py-1 rounded-full font-bold uppercase transition-all">Logout</button>
             </div>
         </div>
     </nav>
 
-    <main id="tab-analyzer" class="container mx-auto mt-8 p-4 grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
-        <section class="lg:col-span-7 glass-card p-6 rounded-3xl shadow-2xl flex flex-col">
-            <h2 class="text-lg font-black text-emerald-900 uppercase tracking-tighter mb-4">Live Execution Input</h2>
-            <textarea id="codeInput" class="w-full p-4 bg-gray-900 text-emerald-400 font-mono text-xs rounded-t-2xl border-b border-gray-800 focus:outline-none" style="height: 200px;" placeholder="def main():&#10; total = 0&#10; for i in range(10000):&#10; total += i&#10; print(total)&#10;&#10;main()"></textarea>            
-            <div id="dragHandler" class="w-full h-1.5 bg-emerald-600 hover:bg-blue-500 cursor-row-resize flex items-center justify-center group z-30"><div class="w-12 h-1 bg-white/30 rounded-full"></div></div>
+    <main id="tab-analyzer" class="container mx-auto mt-6 p-4 flex flex-col gap-6 mb-12">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section class="glass-card p-6 rounded-2xl flex flex-col">
+                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4">Live Execution Input</h2>
+                <textarea id="codeInput" class="w-full p-4 bg-[#111827] text-emerald-400 font-mono text-xs rounded-t-xl border-b border-emerald-500 focus:outline-none" style="height: 180px;" placeholder="print('Hello World')"></textarea>            
+                <div id="terminalContainer" class="w-full bg-black rounded-b-xl p-4 font-mono text-xs mb-4 overflow-y-auto" style="height: 100px;">
+                    <div id="terminalBody" class="text-emerald-100/80 leading-relaxed whitespace-pre-wrap"><span class="text-emerald-500">guest:~$</span> Ready for input.</div>
+                </div>
+                <button onclick="runEditorAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+            </section>
 
-           <div id="terminalContainer" class="w-full bg-black rounded-b-2xl p-5 font-mono text-xs mb-6 overflow-hidden" style="height: 250px;">
-                <div id="terminalBody" class="text-emerald-100/80 leading-relaxed overflow-y-auto h-full whitespace-pre-wrap"><span class="text-emerald-500">guest:~$</span> Initializing Virtual Worker...</div>
+            <section class="glass-card p-6 rounded-2xl flex flex-col relative">
+                <div class="absolute top-1/2 -left-3 transform -translate-y-1/2 bg-gray-200 text-black font-black text-xs px-2 py-1 rounded-full z-10 shadow-sm border border-gray-300 hidden lg:block">OR</div>
+                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 opacity-0">File Upload</h2>
+                <div id="dropzone" class="flex-1 border-4 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center p-6 mb-4 transition-all bg-gray-100 hover:bg-gray-50 cursor-pointer">
+                    <p class="text-gray-600 font-bold text-lg text-center">Drag & Drop<br>FILES</p>
+                    <p class="text-xs text-gray-400 mt-2" id="fileCountDisplay">0 files selected</p>
+                    <input type="file" id="fileUpload" multiple accept=".py" class="hidden">
+                    <button onclick="document.getElementById('fileUpload').click()" class="mt-6 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg text-xs shadow">choose a file on your computer</button>
+                </div>
+                <button onclick="runFileAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+            </section>
+        </div>
+
+        <section class="glass-card p-6 rounded-2xl">
+            <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4">Analysis Results</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm font-mono">
+                    <tbody id="analysisTableBody" class="text-gray-600">
+                        <tr class="bg-gray-100"><td colspan="5" class="py-4 text-center text-xs opacity-50">No data available. Run an analysis.</td></tr>
+                    </tbody>
+                </table>
             </div>
-            
-            <button onclick="runRealAnalysis()" id="runBtn" disabled class="w-full bg-gray-500 text-white font-black py-4 rounded-2xl transition-all shadow-lg uppercase tracking-[0.2em]">Wait for Worker...</button>
         </section>
 
-        <section class="lg:col-span-5 flex flex-col gap-6">
-            <div class="glass-card p-6 rounded-3xl shadow-2xl flex-1">
-                <h2 class="text-lg font-black text-emerald-900 uppercase tracking-tighter mb-4 text-center">Real-Time Physics Model</h2>
-                <div class="h-64 bg-white/40 p-2 rounded-2xl"><canvas id="energyChart"></canvas></div>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="p-5 glass-card rounded-3xl text-center border border-emerald-200">
-                    <p class="text-[10px] text-emerald-600 font-black uppercase mb-1 tracking-widest">Total Energy</p>
-                    <p id="totalJoulesDisp" class="text-3xl font-black text-emerald-900">0.00 J</p>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6" id="detailSection">
+            <section class="lg:col-span-2 flex items-center gap-4">
+                <button onclick="prevDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
+                    <span class="text-xl leading-none">&larr;</span>
+                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Prev</span>
+                </button>
+
+                <div class="flex-1 flex flex-col gap-4">
+                    <div class="glass-card p-6 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-sm font-black text-[#115e59] uppercase tracking-widest mb-2">Real-Time Physics Model</h3>
+                        <div class="w-full h-48 bg-white border border-gray-200 rounded p-2 mb-4">
+                            <canvas id="energyChart"></canvas>
+                        </div>
+                        <h4 id="detailFilename" class="font-black text-lg tracking-wider uppercase text-center break-all text-gray-400">AWAITING SCRIPT</h4>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-emerald-500">
+                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Energy</p>
+                            <p id="detailJoules" class="text-2xl lg:text-3xl font-black text-[#115e59]">0.00 J</p>
+                        </div>
+                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
+                            <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
+                            <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800">0</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="p-5 glass-card rounded-3xl text-center border border-blue-200">
-                    <p class="text-[10px] text-blue-600 font-black uppercase mb-1 tracking-widest">Complexity Ops</p>
-                    <p id="opsCount" class="text-3xl font-black text-blue-900">0</p>
+
+                <button onclick="nextDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
+                    <span class="text-xl leading-none">&rarr;</span>
+                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Next</span>
+                </button>
+            </section>
+
+            <section class="glass-card p-6 rounded-2xl flex flex-col">
+                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions</h2>
+                <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[350px]">
+                    <p id="suggestionText" class="text-sm font-bold text-gray-600 whitespace-pre-wrap">System ready. Input your code or upload files to begin analysis.</p>
                 </div>
-            </div>
-        </section>
+            </section>
+        </div>
     </main>
 
-    <section id="tab-history" class="container mx-auto mt-8 p-4 tab-hidden">
-        <div class="glass-card rounded-[2rem] p-8 shadow-2xl border border-white/20">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-black text-emerald-900 uppercase tracking-tighter italic">📊 Account Execution History</h3>
-                <button onclick="fetchAccountHistory()" class="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-full hover:bg-emerald-200 transition-all uppercase tracking-widest">REFRESH DATA</button>
-            </div>
-            
-            <div class="overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
-                <table class="w-full text-left text-xs font-mono border-separate border-spacing-y-2">
-                    <thead class="sticky top-0 bg-white/90 backdrop-blur-md z-10">
-                        <tr class="text-emerald-800 uppercase tracking-widest text-[10px]">
-                            <th class="pb-4 px-2">Date & Time</th>
-                            <th class="pb-4 px-2">Time Complexity (Ops)</th>
-                            <th class="pb-4 px-2">Space Peak (Bytes)</th>
-                            <th class="pb-4 px-2 text-center">Energy (J)</th>
-                            <th class="pb-4 px-2 text-center">Energy (kWh)</th>
+    <section id="tab-history" class="container mx-auto mt-6 p-4 tab-hidden mb-12">
+        <div class="glass-card p-6 rounded-2xl">
+            <h2 class="text-xl font-black text-[#115e59] uppercase tracking-widest mb-6">Execution History</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm font-mono bg-gray-50 rounded-lg overflow-hidden shadow-inner">
+                    <thead class="bg-gray-200 text-gray-700 text-xs uppercase tracking-wider">
+                        <tr>
+                            <th class="py-3 px-4">File Name</th>
+                            <th class="py-3 px-4">Complexity (Ops)</th>
+                            <th class="py-3 px-4">Peak Memory</th>
+                            <th class="py-3 px-4 text-center">Total Joules</th>
+                            <th class="py-3 px-4 text-center">Total kWh</th>
                         </tr>
                     </thead>
                     <tbody id="dbHistoryTableBody" class="text-gray-600">
-                        <tr><td colspan="5" class="py-8 text-center opacity-50 italic">Loading history from database...</td></tr>
-                    </tbody>
+                        </tbody>
                 </table>
             </div>
         </div>
     </section>
 
-    <section id="tab-profile" class="container mx-auto mt-8 p-4 max-w-md tab-hidden">
-        <div class="glass-card rounded-[2rem] p-8 shadow-2xl border border-white/20 text-center">
-            <h3 class="text-xl font-black text-emerald-900 uppercase tracking-tighter mb-6">Profile Management</h3>
+    <section id="tab-profile" class="container mx-auto mt-6 p-4 max-w-md tab-hidden">
+        <div class="glass-card p-8 rounded-2xl text-center border-t-4 border-[#115e59]">
+            <h2 class="text-xl font-black text-[#115e59] uppercase tracking-widest mb-2">Account Security</h2>
+            <p class="text-xs text-gray-500 mb-6 uppercase tracking-widest">Update your access credentials</p>
             
-            <div class="text-left mb-4">
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Update Password</label>
-                <input type="password" id="newPassword" placeholder="Enter new password" class="w-full mt-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white/50 text-sm font-mono">
-            </div>
+            <input type="password" id="newPassword" placeholder="Enter New Password" class="w-full mb-4 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono text-center">
             
-            <button onclick="updateProfile()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-colors shadow-lg">Save Changes</button>
+            <button onclick="updateProfile()" class="w-full bg-[#115e59] hover:bg-emerald-700 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Save Changes</button>
+            
             <p id="profileMsg" class="mt-4 text-[10px] font-bold uppercase tracking-widest"></p>
         </div>
     </section>
