@@ -211,6 +211,9 @@
                 <button onclick="exportSelectedCSV()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
                     Export
                 </button>
+                <button onclick="deleteSelectedHistory()" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
+                    Delete
+                </button>
             </div>
         </div>
 
@@ -276,8 +279,8 @@
                 <div class="absolute inset-0 m-auto w-2 h-2 bg-emerald-300 rounded-full shadow-[0_0_10px_#6ee7b7] animate-pulse"></div>
             </div>
 
-            <h2 class="text-emerald-400 font-black tracking-widest uppercase text-sm mb-2 text-center animate-pulse">> SYSTEM INITIALIZING</h2>
-            <p class="text-[10px] text-emerald-100/50 font-mono text-center mb-6 uppercase tracking-widest">Loading Heuristic Algorithm...</p>
+            <h2 class="text-emerald-400 font-black tracking-widest uppercase text-sm mb-2 text-center animate-pulse">> SYSTEM OVERRIDE</h2>
+            <p class="text-[10px] text-emerald-100/50 font-mono text-center mb-6 uppercase tracking-widest">Initializing Instruction-Level Energy Model...</p>
 
             <div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden relative">
                 <div class="absolute top-0 left-0 h-full bg-emerald-500 rounded-full w-0 animate-fill-bar shadow-[0_0_10px_#10b981]"></div>
