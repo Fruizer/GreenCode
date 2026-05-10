@@ -22,7 +22,7 @@
 
         <div class="space-y-4">
              <input type="text" id="username" placeholder="Pick a Username" class="hidden w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
-            <input type="text" id="identifier" placeholder="Username or Email" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
+            <input type="text" id="identifier" placeholder="Enter Email" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
             <input type="password" id="password" placeholder="Password" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
         </div>
 
@@ -57,7 +57,7 @@
         document.getElementById('tab-signup').className = !isLogin ? 'flex-1 pb-2 active-tab' : 'flex-1 pb-2';
         
         usernameInput.classList.toggle('hidden', isLogin);
-        identifierInput.placeholder = isLogin ? "Username or Email" : "Email Address";
+        identifierInput.placeholder = isLogin ? "Enter Email" : "Email Address";
         
         document.getElementById('btn-login').classList.toggle('hidden', !isLogin);
         document.getElementById('btn-signup').classList.toggle('hidden', isLogin);
