@@ -9,14 +9,13 @@ try {
 
 let pyodideEngine = null;
 
-// Expose a telemetry function to the Python environment
-self.sendTelemetry = (ops, peak_mem) => {
-    postMessage({ type: "TELEMETRY", ops: ops, mem: peak_mem });
+// --- UPGRADED: Expose telemetry function to accept live traces ---
+self.sendTelemetry = (ops, peak_mem, line_ops_str, line_mem_str) => {
+    postMessage({ type: "TELEMETRY", ops: ops, mem: peak_mem, line_ops: line_ops_str, line_mem: line_mem_str });
 };
 
 async function loadPyodideEngine() {
     try {
-        // 2. Initialize it using the CDN's index URL
         pyodideEngine = await loadPyodide({ 
             indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/" 
         });
@@ -57,23 +56,36 @@ start_time = time.time()
 error_msg = ""
 final_ops = 0
 final_peak_mem = 0
+final_line_ops = {}
+final_line_mem = {}
 
 try:
     sys.setrecursionlimit(5000)
     
+    # === START TRIPLE QUOTE ===
     proxy_definitions = """
-import js  # FIXED: Moved inside the proxy block so the exec() scope can see it
+import js
+import json
 
 def _check_telemetry():
-    # Stream data to the frontend every 250 operations
+    # Stream data AND traces to the frontend every 250 operations
     if __tracker['ops'] % 250 == 0:
-        js.sendTelemetry(__tracker['ops'], __tracker['peak_mem'])
+        ops_json = json.dumps(__tracker.get('line_ops', {}))
+        mem_json = json.dumps(__tracker.get('line_memory', {}))
+        js.sendTelemetry(__tracker['ops'], __tracker['peak_mem'], ops_json, mem_json)
 
 def _update_mem(bytes_added):
     global __tracker
     __tracker['current_mem'] += bytes_added
     if __tracker['current_mem'] > __tracker['peak_mem']:
         __tracker['peak_mem'] = __tracker['current_mem']
+        
+    active_line = __tracker.get('active_line', 'unknown')
+    if active_line != 'unknown' and bytes_added > 0:
+        if 'line_memory' not in __tracker:
+            __tracker['line_memory'] = {}
+        __tracker['line_memory'].setdefault(active_line, 0)
+        __tracker['line_memory'][active_line] += bytes_added
 
 class GreenList(list):
     def __init__(self, *args):
@@ -95,6 +107,7 @@ class GreenList(list):
         super().clear()
         _update_mem(-freed_bytes)
 """
+    # === END TRIPLE QUOTE ===
 
     full_code = proxy_definitions + "\\n" + ${JSON.stringify(userCode)}
     
@@ -108,6 +121,8 @@ class GreenList(list):
     if '__tracker' in exec_globals:
         final_ops = exec_globals['__tracker'].get('ops', 0)
         final_peak_mem = exec_globals['__tracker'].get('peak_mem', 0)
+        final_line_ops = exec_globals['__tracker'].get('line_ops', {})
+        final_line_mem = exec_globals['__tracker'].get('line_memory', {})
 
 except Exception as e:
     error_msg = str(e)
@@ -121,7 +136,9 @@ result = {
     "error": error_msg,
     "ops": final_ops, 
     "memory_peak_bytes": final_peak_mem, 
-    "duration_sec": end_time - start_time
+    "duration_sec": end_time - start_time,
+    "line_ops": final_line_ops,
+    "line_memory": final_line_mem
 }
 json.dumps(result)
 `;
