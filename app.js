@@ -1,15 +1,15 @@
 // app.js
 
-// ==========================================
-// SUPABASE CONFIGURATION
-// ==========================================
+// ============================================================================
+// 1. SUPABASE CONFIGURATION & UI STATE
+// ============================================================================
+//  Connects the app to your cloud database and sets up the 
+// variables that control the user interface (files, charts, and loading states).
+
 const supabaseUrl = 'https://fadbccudiffeneemlmvb.supabase.co';
 const supabaseKey = 'sb_publishable__VXBEPzv_zSCuysL-UO02Q_LQ2kHh8z';
 const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-// ==========================================
-// STATE MANAGEMENT & CONSTANTS
-// ==========================================
 let uploadedFiles = []; 
 let analysisResults = []; 
 let currentDetailIndex = 0; 
@@ -17,80 +17,54 @@ let energyChart;
 let activeWorkers = []; 
 let globalHistoryData = []; 
 
-const C_CPU = 1.5e-9;
-const C_MEM = 2.25e-9;
-const C_BASE = 0.0005;
-
 window.onload = function() {
     setupChart();
     setupDragAndDrop();
 };
 
-// ==========================================
-// DRAG AND DROP & FILE HANDLING
-// ==========================================
-function setupDragAndDrop() {
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileUpload');
 
-    if (!dropzone || !fileInput) return;
+// ============================================================================
+// 2. ILEM HEURISTIC CONSTANTS
+// ============================================================================
+// These are the exact physics constants derived from
+// Instruction-Level Energy Model research. They act as the multipliers for 
+// the heuristic algorithm to convert software behavior into physical Joules.
 
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
-    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dropzone-active'); });
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dropzone-active');
-        handleFiles(e.dataTransfer.files);
-    });
+const C_CPU = 1.5e-9;
+const C_MEM = 2.25e-9;
+const C_BASE = 0.0005;
 
-    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
-}
 
-async function handleFiles(files) {
-    uploadedFiles = []; 
-    for (let file of files) {
-        if (file.name.endsWith('.py')) {
-            const text = await file.text();
-            uploadedFiles.push({ name: file.name, content: text });
-        }
-    }
-    
-    // Update the text counter
-    const countDisplay = document.getElementById('fileCountDisplay');
-    if (countDisplay) countDisplay.innerText = `${uploadedFiles.length} file(s) ready for analysis.`;
+// ============================================================================
+// 3. LEXICAL ANALYZER (CODE INTERCEPTION)
+// ============================================================================
+// This represents the O(n) Linear Scan mentioned in the paper.
+// It reads the user's Python code line-by-line and dynamically injects 
+// telemetry trackers (__tracker['ops'] += 1) before sending it to the sandbox.
 
-    // Render the visual file previews!
-    const previewList = document.getElementById('filePreviewList');
-    if (previewList) {
-        previewList.innerHTML = ''; // Clear old previews
-        uploadedFiles.forEach(file => {
-            // Generate a sleek green pill for each file
-            previewList.innerHTML += `
-                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
-                    📄 ${file.name}
-                </span>`;
-        });
-    }
-
-    logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
-}
-
-// ==========================================
-// LEXICAL ANALYSIS & WORKER EXECUTION
-// ==========================================
 function instrumentPythonCodeJS(rawCode) {
     const lines = rawCode.split('\n');
-    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0}'];
+    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "line_ops": {}, "line_memory": {}, "active_line": 0}'];
     
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
+        let lineNum = i + 1;
         
+        // Proxy Injection: Replaces standard lists with GreenList
         if (line.match(/=\s*\[(.*?)\]/)) {
             line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
         }
         
+        // Inject active line tracker for Memory Tracing
+        let indentMatch = line.match(/^(\s*)/);
+        let currentIndent = indentMatch ? indentMatch[1] : "";
+        if (line.trim() !== "" && !line.trim().startsWith("#") && !line.trim().startsWith("def ") && !line.trim().startsWith("class ")) {
+            instrumentedCode.push(currentIndent + `__tracker['active_line'] = ${lineNum}`);
+        }
+        
         instrumentedCode.push(line);
         
+        // Loop Injection: Tracks overall Ops and Line-Specific Ops
         if (line.match(/^\s*(for|while|def)\b.*:/)) {
             let nextLineIndent = "    "; 
             for (let j = i + 1; j < lines.length; j++) {
@@ -102,11 +76,21 @@ function instrumentPythonCodeJS(rawCode) {
                 }
             }
             instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
+            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'].setdefault(${lineNum}, 0)`);
+            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'][${lineNum}] += 1`);
             instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
         }
     }
     return instrumentedCode.join('\n');
 }
+
+
+// ============================================================================
+// 4. WEB WORKER MANAGEMENT (SANDBOXING)
+// ============================================================================
+// This handles the isolated Pyodide WebAssembly threads. 
+// It safely runs the instrumented Python code in the background so it doesn't 
+// crash the user's main browser tab.
 
 function runWorkerTask(scriptName, rawCode, onTelemetry) {
     return new Promise((resolve, reject) => {
@@ -116,10 +100,11 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
         const instrumented = instrumentPythonCodeJS(rawCode);
 
         worker.onmessage = function(e) {
-            const { type, data, error, ops, mem } = e.data;
-            
+            // Catch the line_ops and line_mem from the worker event
+            const { type, data, error, ops, mem, line_ops, line_mem } = e.data; 
+
             if (type === "TELEMETRY") {
-                if (onTelemetry) onTelemetry(ops, mem); 
+                if (onTelemetry) onTelemetry(ops, mem, line_ops, line_mem);
             } else if (type === "READY") {
                 worker.postMessage({ userCode: instrumented });
             } else if (type === "RESULT") {
@@ -152,37 +137,20 @@ function forceStopWorkers() {
     updateStatus("SYSTEM IDLE", "text-emerald-300");
 }
 
-// ==========================================
-// ANALYSIS TRIGGER BUTTONS
-// ==========================================
-async function runEditorAnalysis() {
-    const code = document.getElementById('codeInput').value;
-    if (!code) return logToTerminal("Editor is empty.", "WARN");
-    
-    document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal("Starting Editor Analysis...", "INFO");
-    await executeBatch([{ name: "editor_script.py", content: code }]);
-}
 
-async function runFileAnalysis() {
-    if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
-    
-    document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
-    await executeBatch(uploadedFiles);
-}
+// ============================================================================
+// 5. CORE HEURISTIC ESTIMATION ALGORITHM (THE MATH)
+// ============================================================================
+// This is the heart of the system. It receives the raw Ops and 
+// Peak Memory from the Worker, applies the Linear Weighted Heuristic Formula, 
+// and outputs the final Thermodynamic Joules.
 
-// ==========================================
-// REAL-TIME BATCH EXECUTION
-// ==========================================
 async function executeBatch(scriptArray) {
-    // 1. TRIGGER THE GLASSMORPHISM OVERLAY
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
     
     if (overlay && modal) {
         overlay.classList.remove('hidden');
-        // Tiny delay forces the browser to render the fade-in animation
         setTimeout(() => {
             overlay.classList.remove('opacity-0');
             overlay.classList.add('opacity-100');
@@ -198,6 +166,8 @@ async function executeBatch(scriptArray) {
         name: script.name,
         content: script.content, 
         ops: 0, bytes: 0, joules: 0, kwh: 0, error: null,
+        duration: 0, cpu_joules: 0, mem_joules: 0, base_joules: C_BASE,
+        line_ops: {}, line_memory: {}, 
         status: 'RUNNING', 
         history: Array(25).fill(0) 
     }));
@@ -210,50 +180,46 @@ async function executeBatch(scriptArray) {
     logToTerminal("Allocating WebAssembly Sandboxes...", "INFO");
     logToTerminal("Injecting Telemetry Hooks...", "INFO");
 
-    // 2. THE ARTIFICIAL DELAY (Wait for 1.5 seconds while the bar fills)
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // 3. DISSOLVE THE OVERLAY
     if (overlay && modal) {
         overlay.classList.remove('opacity-100');
         overlay.classList.add('opacity-0');
         modal.classList.remove('scale-100');
         modal.classList.add('scale-95');
-        // Wait for the fade-out CSS animation to finish before hiding it completely
         setTimeout(() => { overlay.classList.add('hidden'); }, 300); 
     }
 
-    // 4. START ACTUAL EXECUTION
     updateStatus("ANALYZING...", "text-blue-400 animate-pulse");
     logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
     const startTime = Date.now();
 
-    try {
+   try {
         const tasks = scriptArray.map((script, index) => {
-            return runWorkerTask(script.name, script.content, (ops, mem) => {
-            const res = analysisResults[index];
-            const t_exec = (Date.now() - startTime) / 1000;
-            
-            res.ops = ops;
-            res.bytes = mem;
+            // Accept the JSON strings from the worker
+            return runWorkerTask(script.name, script.content, (ops, mem, line_ops_str, line_mem_str) => {
+                const res = analysisResults[index];
+                const t_exec = (Date.now() - startTime) / 1000;
+                
+                res.ops = ops;
+                res.bytes = mem;
 
-            // ----------------------------------------------------
-            // Calculate the breakdown LIVE during the loop
-            // ----------------------------------------------------
+                // --- SAVE THE TRACES LIVE SO FORCE STOP DOESNT DELETE THEM! ---
+                if (line_ops_str) res.line_ops = JSON.parse(line_ops_str);
+                if (line_mem_str) res.line_memory = JSON.parse(line_mem_str);
 
-            res.cpu_joules = res.ops * C_CPU;
-            res.mem_joules = res.bytes * t_exec * C_MEM;
+                // --- LIVE HEURISTIC CALCULATION ---
+                res.cpu_joules = res.ops * C_CPU;
+                res.mem_joules = res.bytes * t_exec * C_MEM;
+                res.joules = res.cpu_joules + res.mem_joules + res.base_joules;
+                res.kwh = res.joules / 3600000;
+                // ----------------------------------
 
-            // Sum them up for the total
-            res.joules = res.cpu_joules + res.mem_joules + res.base_joules;
-            res.kwh = res.joules / 3600000;
-            // ----------------------------------------------------
+                res.history.shift();
+                res.history.push(ops);
 
-            res.history.shift();
-            res.history.push(ops);
-
-            updateTableRow(index, res);
-            if (currentDetailIndex === index) updateLiveUI(res);
+                updateTableRow(index, res);
+                if (currentDetailIndex === index) updateLiveUI(res);
             });
         });
 
@@ -274,24 +240,25 @@ async function executeBatch(scriptArray) {
                 }
 
             } else {
-                resState.status = 'COMPLETED'; 
+                resState.status = 'SUCCESS';
                 resState.ops = finalRes.ops || resState.ops;
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
                 resState.duration = finalRes.duration_sec || ((Date.now() - startTime) / 1000);
+                
+                resState.line_ops = finalRes.line_ops || {};
+                resState.line_memory = finalRes.line_memory || {};
 
-                // Calculate the individual components
+                // --- FINAL HEURISTIC CALCULATION ---
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
-
-                // Sum them up for the final metric
                 resState.joules = resState.cpu_joules + resState.mem_joules + resState.base_joules;
                 resState.kwh = resState.joules / 3600000;
+                // -----------------------------------
                 
                 resState.history.shift();
                 resState.history.push(resState.ops);
 
                 logToTerminal(`[${resState.name}] Success: ${resState.ops} Ops`, "SUCCESS");
-                
                 await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
             }
         }
@@ -306,9 +273,176 @@ async function executeBatch(scriptArray) {
     }
 }
 
-// ==========================================
-// UI RENDERING & LIVE UPDATES
-// ==========================================
+
+// ============================================================================
+// 6. STATIC CODE PROFILER (SUGGESTIONS GENERATOR)
+// ============================================================================
+// Instead of running the code, this algorithm scans the raw 
+// text for known "Energy Anti-Patterns" (like reading huge files to RAM) 
+// and generates the recommendations in the right-hand panel.
+
+function generateSuggestions(data) {
+    const suggestionEl = document.getElementById('suggestionText');
+    let htmlContent = "";
+
+    if (data.status === 'RUNNING') {
+        suggestionEl.innerHTML = `<div class="animate-pulse text-[#115e59] font-black uppercase tracking-widest text-center mt-8">
+            <span class="text-3xl block mb-2">⏳</span>Scanning Lines...<br>
+            <span class="text-[10px] text-gray-500">Static Telemetry active</span></div>`;
+        return; 
+    }
+
+    htmlContent += `<h4 class="font-black text-xs text-gray-400 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnosis: ${data.name}</h4>`;
+    htmlContent += `<ul class="space-y-3 text-sm font-medium text-gray-700">`;
+
+    let issues = 0;
+
+    if (data.error) {
+        htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">🛑</span> <span><strong>Execution Halted:</strong> ${data.error}</span></li>`;
+        issues++; 
+    } else if (data.ops === 0) {
+        htmlContent += `<li class="flex gap-2 items-start"><span class="text-yellow-500 text-lg leading-none">⚠️</span> <span><strong>Empty:</strong> No active logic detected.</span></li>`;
+        issues++;
+    }
+
+    const code = data.content || ""; 
+    const lines = code.split('\n');
+    
+    lines.forEach((line, index) => {
+        const lineNum = index + 1; 
+        const trimmed = line.trim(); 
+
+        if ((trimmed.startsWith("for ") || trimmed.startsWith("while ")) && line.startsWith("        ")) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🔍</span> <span><strong>Line ${lineNum}:</strong> Nested loop. Causes O(n²) complexity.</span></li>`; issues++;
+        }
+        if (trimmed.includes("time.sleep")) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">⏰</span> <span><strong>Line ${lineNum}:</strong> <code>time.sleep()</code> wastes CPU cycles.</span></li>`; issues++;
+        }
+        if (trimmed.startsWith("print(") && line.match(/^\s{4,}/)) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🖨️</span> <span><strong>Line ${lineNum}:</strong> I/O print inside a loop is an energy bottleneck.</span></li>`; issues++;
+        }
+        if (trimmed.includes(".read()") || trimmed.includes(".readlines()")) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📂</span> <span><strong>Line ${lineNum}:</strong> Loads full file to RAM. Iterate line-by-line instead.</span></li>`; issues++;
+        }
+        if (trimmed.match(/\[.*for.*in.*\]/)) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">💡</span> <span><strong>Line ${lineNum}:</strong> Great use of a List Comprehension!</span></li>`;
+        }
+        if (trimmed.includes("yield ")) {
+            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">🔋</span> <span><strong>Line ${lineNum}:</strong> Excellent use of a Generator (<code>yield</code>)!</span></li>`;
+        }
+    });
+
+    if (data.ops > 50000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📈</span> <span>High CPU Load (${data.ops.toLocaleString()} Ops).</span></li>`; issues++; }
+    if (data.bytes > 1000000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">💾</span> <span>Heavy Memory (${(data.bytes/1000000).toFixed(2)} MB).</span></li>`; issues++; }
+    
+    if (issues === 0) { htmlContent += `<li class="flex gap-2 items-start pt-2 border-t border-gray-300 mt-2"><span class="text-emerald-600 text-lg leading-none">🏆</span> <span class="text-emerald-600 font-black tracking-wide">GREEN-COMPLIANT ALGORITHM</span></li>`; }
+    
+    suggestionEl.innerHTML = htmlContent + `</ul>`;
+}
+
+
+// ============================================================================
+// 7. UI, VISUALIZATION & USER INPUTS
+// ============================================================================
+// This section handles the buttons, the Chart.js graph updates, 
+// and rendering the Line-by-Line dropdown traces on the dashboard.
+
+function updateLiveUI(res) {
+    document.getElementById('detailJoules').innerText = `${res.joules.toFixed(6)} J`;
+    document.getElementById('detailOps').innerText = res.ops;
+
+    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
+    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
+    document.getElementById('breakdownBase').innerText = `${res.base_joules.toFixed(6)} J`;
+
+    let cpuHtml = "";
+    if (Object.keys(res.line_ops).length === 0) cpuHtml = `<p class="opacity-50 italic">No computational loops detected.</p>`;
+    else {
+        for (const [line, ops] of Object.entries(res.line_ops)) {
+            let j = (ops * C_CPU).toFixed(6);
+            cpuHtml += `<div class="flex justify-between border-b border-blue-800/50 py-1"><span>Line ${line}: <span class="text-blue-200">${ops.toLocaleString()} Ops</span></span><span class="font-bold text-emerald-300">${j} J</span></div>`;
+        }
+    }
+    const cpuLineDetails = document.getElementById('cpuLineDetails');
+    if(cpuLineDetails) cpuLineDetails.innerHTML = cpuHtml;
+
+    let memHtml = "";
+    if (Object.keys(res.line_memory).length === 0) memHtml = `<p class="opacity-50 italic">No dynamic list allocations detected.</p>`;
+    else {
+        for (const [line, bytes] of Object.entries(res.line_memory)) {
+            let j = (bytes * res.duration * C_MEM).toFixed(6);
+            memHtml += `<div class="flex justify-between border-b border-purple-800/50 py-1"><span>Line ${line}: <span class="text-purple-200">${bytes.toLocaleString()} B</span></span><span class="font-bold text-emerald-300">${j} J</span></div>`;
+        }
+    }
+    const memLineDetails = document.getElementById('memLineDetails');
+    if(memLineDetails) memLineDetails.innerHTML = memHtml;
+
+    if (energyChart) {
+        energyChart.data.datasets[0].data = res.history;
+        energyChart.update('none'); 
+    }
+}
+
+async function runEditorAnalysis() {
+    const code = document.getElementById('codeInput').value;
+    if (!code) return logToTerminal("Editor is empty.", "WARN");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal("Starting Editor Analysis...", "INFO");
+    await executeBatch([{ name: "editor_script.py", content: code }]);
+}
+
+async function runFileAnalysis() {
+    if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
+    await executeBatch(uploadedFiles);
+}
+
+function setupDragAndDrop() {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileUpload');
+
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
+    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dropzone-active'); });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dropzone-active');
+        handleFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+}
+
+async function handleFiles(files) {
+    uploadedFiles = []; 
+    for (let file of files) {
+        if (file.name.endsWith('.py')) {
+            const text = await file.text();
+            uploadedFiles.push({ name: file.name, content: text });
+        }
+    }
+    
+    const countDisplay = document.getElementById('fileCountDisplay');
+    if (countDisplay) countDisplay.innerText = `${uploadedFiles.length} file(s) ready for analysis.`;
+
+    const previewList = document.getElementById('filePreviewList');
+    if (previewList) {
+        previewList.innerHTML = ''; 
+        uploadedFiles.forEach(file => {
+            previewList.innerHTML += `
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
+                    📄 ${file.name}
+                </span>`;
+        });
+    }
+
+    logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
+}
+
 function renderAnalysisTable() {
     const tbody = document.getElementById('analysisTableBody');
     if (!tbody) return;
@@ -338,20 +472,6 @@ function updateTableRow(index, res) {
     }
 }
 
-function updateLiveUI(res) {
-    document.getElementById('detailJoules').innerText = `${res.joules.toFixed(6)} J`;
-    document.getElementById('detailOps').innerText = res.ops;
-
-    // Injecting the breakdown data
-    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
-    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
-    document.getElementById('breakdownBase').innerText = `${res.base_joules.toFixed(6)} J`;
-
-    if (energyChart) {
-        energyChart.data.datasets[0].data = res.history;
-        energyChart.update('none'); 
-    }
-}
 function updateCarouselUI() {
     if (analysisResults.length === 0) return;
     const current = analysisResults[currentDetailIndex];
@@ -384,75 +504,6 @@ function jumpToDetail(index) {
     updateCarouselUI();
 }
 
-// ==========================================
-// ANALYSIS ENGINE: PURE REGEX / TELEMETRY
-// ==========================================
-function generateSuggestions(data) {
-    const suggestionEl = document.getElementById('suggestionText');
-    let htmlContent = "";
-
-    if (data.status === 'RUNNING') {
-        suggestionEl.innerHTML = `<div class="animate-pulse text-[#115e59] font-black uppercase tracking-widest text-center mt-8">
-            <span class="text-3xl block mb-2">⏳</span>Scanning Lines...<br>
-            <span class="text-[10px] text-gray-500">Static Telemetry active</span></div>`;
-        return; 
-    }
-
-    htmlContent += `<h4 class="font-black text-xs text-gray-400 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnosis: ${data.name}</h4>`;
-    htmlContent += `<ul class="space-y-3 text-sm font-medium text-gray-700">`;
-
-    let issues = 0;
-
-    // 1. Check for Forced Stops / Crashes (BUT DO NOT STOP THE SCAN!)
-    if (data.error) {
-        htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">🛑</span> <span><strong>Execution Halted:</strong> ${data.error}</span></li>`;
-        issues++; // Prevents the perfect score badge since it didn't finish naturally
-    } else if (data.ops === 0) {
-        htmlContent += `<li class="flex gap-2 items-start"><span class="text-yellow-500 text-lg leading-none">⚠️</span> <span><strong>Empty:</strong> No active logic detected.</span></li>`;
-        issues++;
-    }
-
-    // 2. STATIC ANALYSIS: Still scan the code lines regardless of how it ended
-    const code = data.content || ""; 
-    const lines = code.split('\n');
-    
-    lines.forEach((line, index) => {
-        const lineNum = index + 1; 
-        const trimmed = line.trim(); 
-
-        if ((trimmed.startsWith("for ") || trimmed.startsWith("while ")) && line.startsWith("        ")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🔍</span> <span><strong>Line ${lineNum}:</strong> Nested loop. Causes O(n²) complexity.</span></li>`; issues++;
-        }
-        if (trimmed.includes("time.sleep")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">⏰</span> <span><strong>Line ${lineNum}:</strong> <code>time.sleep()</code> wastes CPU cycles.</span></li>`; issues++;
-        }
-        if (trimmed.startsWith("print(") && line.match(/^\s{4,}/)) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🖨️</span> <span><strong>Line ${lineNum}:</strong> I/O print inside a loop is an energy bottleneck.</span></li>`; issues++;
-        }
-        if (trimmed.includes(".read()") || trimmed.includes(".readlines()")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📂</span> <span><strong>Line ${lineNum}:</strong> Loads full file to RAM. Iterate line-by-line instead.</span></li>`; issues++;
-        }
-        if (trimmed.match(/\[.*for.*in.*\]/)) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">💡</span> <span><strong>Line ${lineNum}:</strong> Great use of a List Comprehension!</span></li>`;
-        }
-        if (trimmed.includes("yield ")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">🔋</span> <span><strong>Line ${lineNum}:</strong> Excellent use of a Generator (<code>yield</code>)!</span></li>`;
-        }
-    });
-
-    // 3. DYNAMIC TELEMETRY: Evaluate the partial ops/memory gathered before the force stop
-    if (data.ops > 50000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📈</span> <span>High CPU Load (${data.ops.toLocaleString()} Ops).</span></li>`; issues++; }
-    if (data.bytes > 1000000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">💾</span> <span>Heavy Memory (${(data.bytes/1000000).toFixed(2)} MB).</span></li>`; issues++; }
-    
-    // 4. Final Verdict
-    if (issues === 0) { htmlContent += `<li class="flex gap-2 items-start pt-2 border-t border-gray-300 mt-2"><span class="text-emerald-600 text-lg leading-none">🏆</span> <span class="text-emerald-600 font-black tracking-wide">GREEN-COMPLIANT ALGORITHM</span></li>`; }
-    
-    suggestionEl.innerHTML = htmlContent + `</ul>`;
-}
-
-// ==========================================
-// UTILITIES, CHART & DATABASE
-// ==========================================
 function setupChart() {
     const ctx = document.getElementById('energyChart');
     if (!ctx) return;
@@ -512,6 +563,13 @@ function switchTab(tabName) {
     if (tabName === 'profile') loadProfileData(); 
 }
 
+
+// ============================================================================
+// 8. DATABASE, HISTORY & DATA EXPORT (SUPABASE)
+// ============================================================================
+// This handles pushing the final Joules up to the Supabase 
+// cloud, pulling them down for the History tab, and generating the CSV files.
+
 async function loadProfileData() {
     const usernameEl = document.getElementById('profileUsername');
     const emailEl = document.getElementById('profileEmail');
@@ -541,9 +599,6 @@ async function loadProfileData() {
     }
 }
 
-// ==========================================
-// HISTORY FETCHING & SEARCHING
-// ==========================================
 async function fetchAccountHistory() {
     const tableBody = document.getElementById('dbHistoryTableBody');
     if(!tableBody) return;
@@ -571,13 +626,6 @@ async function fetchAccountHistory() {
         tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-red-500 italic font-bold">Error connecting to database.</td></tr>';
         console.error("Supabase fetch error:", e);
     }
-    
-    const filteredData = globalHistoryData.filter(row => {
-        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
-        return filename.includes(query);
-    });
-    
-    renderHistoryTable(filteredData);
 }
 
 function renderHistoryTable(dataToRender) {
@@ -597,12 +645,10 @@ function renderHistoryTable(dataToRender) {
         const timePart = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
         const groupKey = `${datePart} at ${timePart}`;
 
-        // 1. Render the Date Header (Make the whole header clickable to Select All)
         if (groupKey !== currentGroup) {
             currentGroup = groupKey;
             const headerTr = document.createElement('tr');
             
-            // Styled to look clickable
             headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
             headerTr.innerHTML = `
                 <td colspan="5" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
@@ -612,7 +658,6 @@ function renderHistoryTable(dataToRender) {
                 </td>
             `;
 
-            // When the header is clicked, toggle all rows under it
             headerTr.onclick = function() {
                 const masterCb = this.querySelector('.group-master-checkbox');
                 masterCb.checked = !masterCb.checked;
@@ -620,14 +665,13 @@ function renderHistoryTable(dataToRender) {
                 const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
                 checkboxes.forEach(cb => {
                     if (cb.checked !== masterCb.checked) {
-                        cb.closest('tr').click(); // Simulate a click on the row to trigger highlight
+                        cb.closest('tr').click(); 
                     }
                 });
             };
             tableBody.appendChild(headerTr);
         }
 
-        // 2. Render the File Row (Make the whole row clickable)
         const tr = document.createElement('tr');
         tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
         
@@ -646,20 +690,15 @@ function renderHistoryTable(dataToRender) {
             <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
         `;
 
-        // When the row is clicked, secretly check the hidden box and highlight the row!
         tr.onclick = function() {
             const cb = this.querySelector('.history-checkbox');
             cb.checked = !cb.checked;
 
             if (cb.checked) {
-                // Remove default colors
                 this.classList.remove('bg-white', 'hover:bg-emerald-50');
-                // Add the new high-contrast Blue selection theme
                 this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
             } else {
-                // Restore default colors
                 this.classList.add('bg-white', 'hover:bg-emerald-50');
-                // Remove the Blue theme
                 this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
             }
         };
@@ -668,117 +707,6 @@ function renderHistoryTable(dataToRender) {
     });
 }
 
-// Checkbox Utility: Select all items in a date group
-function toggleSelectGroup(masterCheckbox, groupKey) {
-    const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
-    checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
-}
-
-function searchHistory() {
-    const query = document.getElementById('historySearch').value.toLowerCase();
-    
-    if (!query) {
-        renderHistoryTable(globalHistoryData);
-        return;
-    }
-    
-    const filteredData = globalHistoryData.filter(row => {
-        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
-        return filename.includes(query);
-    });
-    
-    renderHistoryTable(filteredData);
-}
-
-function renderHistoryTable(dataToRender) {
-    const tableBody = document.getElementById('dbHistoryTableBody');
-    tableBody.innerHTML = ''; 
-    
-    if (!dataToRender || dataToRender.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center opacity-50 italic">No execution matching search found.</td></tr>';
-        return;
-    }
-    
-    let currentGroup = ""; 
-
-    dataToRender.forEach(row => {
-        const dateObj = new Date(row.created_at);
-        const datePart = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-        const timePart = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        const groupKey = `${datePart} at ${timePart}`;
-
-        // 1. Render the Date Header (Make the whole header clickable to Select All)
-        if (groupKey !== currentGroup) {
-            currentGroup = groupKey;
-            const headerTr = document.createElement('tr');
-            
-            // Styled to look clickable
-            headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
-            headerTr.innerHTML = `
-                <td colspan="5" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
-                    ⏱ Computed on: <span class="text-emerald-700">${groupKey}</span>
-                    <span class="ml-2 text-emerald-600/50 text-[9px] font-bold tracking-wider">(CLICK TO SELECT ALL)</span>
-                    <input type="checkbox" class="hidden group-master-checkbox" data-group-master="${groupKey}">
-                </td>
-            `;
-
-            // When the header is clicked, toggle all rows under it
-            headerTr.onclick = function() {
-                const masterCb = this.querySelector('.group-master-checkbox');
-                masterCb.checked = !masterCb.checked;
-
-                const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
-                checkboxes.forEach(cb => {
-                    if (cb.checked !== masterCb.checked) {
-                        cb.closest('tr').click(); // Simulate a click on the row to trigger highlight
-                    }
-                });
-            };
-            tableBody.appendChild(headerTr);
-        }
-
-        // 2. Render the File Row (Make the whole row clickable)
-        const tr = document.createElement('tr');
-        tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
-        
-        const displayFilename = row.filename ? row.filename : "script.py"; 
-        const preciseJoules = parseFloat(row.energy_joules);
-        const preciseKwh = parseFloat(row.energy_kwh) || (preciseJoules / 3600000);
-        
-        tr.innerHTML = `
-            <td class="py-3 px-4 text-gray-800 font-bold text-xs truncate max-w-[200px] relative">
-                <input type="checkbox" value="${row.id}" class="hidden history-checkbox" data-group="${groupKey}">
-                ${displayFilename}
-            </td>
-            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Ops</td>
-            <td class="py-3 px-4 font-mono text-purple-700">${row.peak_memory_bytes} B</td>
-            <td class="py-3 px-4 text-center font-black text-emerald-600">${preciseJoules.toFixed(6)} J</td>
-            <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
-        `;
-
-        // When the row is clicked, secretly check the hidden box and highlight the row!
-        tr.onclick = function() {
-            const cb = this.querySelector('.history-checkbox');
-            cb.checked = !cb.checked;
-
-            if (cb.checked) {
-                // Remove default colors
-                this.classList.remove('bg-white', 'hover:bg-emerald-50');
-                // Add the new high-contrast Blue selection theme
-                this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
-            } else {
-                // Restore default colors
-                this.classList.add('bg-white', 'hover:bg-emerald-50');
-                // Remove the Blue theme
-                this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
-            }
-        };
-
-        tableBody.appendChild(tr);
-    });
-}
-
-// Checkbox Utility: Select all items in a date group
 function toggleSelectGroup(masterCheckbox, groupKey) {
     const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
     checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
@@ -856,10 +784,6 @@ async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
     }
 }
 
-// ==========================================
-// CSV EXPORT & BATCH DELETION
-// ==========================================
-
 function exportSelectedCSV() {
     const checkboxes = document.querySelectorAll('.history-checkbox:checked');
     if (checkboxes.length === 0) return alert("Please select at least one record to export.");
@@ -896,7 +820,6 @@ async function deleteSelectedHistory() {
 
     const selectedIds = Array.from(checkboxes).map(cb => cb.value);
 
-    // Visual Loading State
     const tableBody = document.getElementById('dbHistoryTableBody');
     tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
 
@@ -912,7 +835,7 @@ async function deleteSelectedHistory() {
 
     } catch (error) {
         console.error("Error deleting records:", error);
-        await fetchAccountHistory(); // Instantly restore the UI if the network drops
+        await fetchAccountHistory(); 
         alert("Failed to delete records. Check console for details.");
     }
 }
