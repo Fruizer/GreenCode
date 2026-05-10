@@ -1,9 +1,10 @@
 // worker.js
 
+// 1. Pull the Pyodide engine from the CDN instead of a local folder
 try {
-    importScripts("./pyodide_engine/pyodide.js"); 
+    importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"); 
 } catch (e) {
-    postMessage({ type: "ERROR", error: "404: Pyodide not found." });
+    postMessage({ type: "ERROR", error: "404: Pyodide CDN could not be reached." });
 }
 
 let pyodideEngine = null;
@@ -15,7 +16,10 @@ self.sendTelemetry = (ops, peak_mem) => {
 
 async function loadPyodideEngine() {
     try {
-        pyodideEngine = await loadPyodide({ indexURL: "./pyodide_engine/" });
+        // 2. Initialize it using the CDN's index URL
+        pyodideEngine = await loadPyodide({ 
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/" 
+        });
         postMessage({ type: "READY" });
     } catch (err) {
         postMessage({ type: "ERROR", error: "Boot Failed: " + err.message });
