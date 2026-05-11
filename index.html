@@ -69,46 +69,50 @@
     }
 
     async function signUp() {
-    const username = usernameInput.value; // Used as a display name
-    const email = identifierInput.value; // Now strictly used as email
-    const password = passwordInput.value;
+        const username = usernameInput.value; 
+        const email = identifierInput.value; 
+        const password = passwordInput.value;
 
-    showMessage("Creating account...", false);
+        showMessage("Creating account...", false);
 
-    // 1. Create the Auth User
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-    });
+        // 1. Create the Auth User
+        const { data, error } = await supabaseClient.auth.signUp({
+            email: email,
+            password: password,
+        });
 
-    if (error) return showMessage(error.message, true);
+        if (error) return showMessage(error.message, true);
 
-    // 2. Save the Display Name to Profiles
-    const { error: profileError } = await supabaseClient
-        .from('profiles')
-        .insert([{ id: data.user.id, username: username, email: email }]);
+        // 2. Save the Display Name to Profiles
+        const { error: profileError } = await supabaseClient
+            .from('profiles')
+            .insert([{ id: data.user.id, username: username, email: email }]);
 
-    if (profileError) console.error("Profile error:", profileError);
-    
-    // Redirect instantly since Confirm Email is OFF
-    window.location.href = 'index.html';
-}
+        if (profileError) console.error("Profile error:", profileError);
+        
+        // FIX: Redirect to dashboard.html instead of index.html
+        window.location.href = 'dashboard.html';
+    }
 
-async function logIn() {
-    const email = identifierInput.value;
-    const password = passwordInput.value;
+    async function logIn() {
+        const email = identifierInput.value;
+        const password = passwordInput.value;
 
-    showMessage("Authenticating...", false);
+        showMessage("Authenticating...", false);
 
-    // Simple Email Login
-    const { error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password,
-    });
+        // Simple Email Login
+        const { error } = await supabaseClient.auth.signInWithPassword({
+            email: email,
+            password: password,
+        });
 
-    if (error) showMessage(error.message, true);
-    else window.location.href = 'index.html';
-}
+        if (error) {
+            showMessage(error.message, true);
+        } else {
+            // FIX: Redirect to dashboard.html instead of index.html
+            window.location.href = 'dashboard.html';
+        }
+    }
 
     async function resetPassword() {
         if (!identifierInput.value) return showMessage("Input email first.", true);
