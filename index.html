@@ -3,119 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenCode Access</title>
+    <title>GreenCode | Authentication</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        .active-tab { border-bottom: 3px solid #10b981; color: #065f46; font-weight: 900; }
-        .hidden { display: none; }
+        /* Tactical Grid Background matching the dashboard */
+        body { 
+            background-color: #d1d5db; 
+            background-image: radial-gradient(#9ca3af 1px, transparent 1px);
+            background-size: 20px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        } 
+        
+        .glass-card { 
+            background: rgba(255, 255, 255, 0.95); 
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.2); 
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(10px);
+        }
     </style>
 </head>
-<body class="bg-[#115e59] flex items-center justify-center min-h-screen">
-    <div class="bg-white p-8 rounded-2xl shadow-2xl w-96 text-center">
-        <h2 class="text-xl font-black text-[#115e59] uppercase tracking-widest mb-6">GreenCode Analyzer</h2>
+<body class="font-sans text-gray-800">
+
+    <div class="glass-card p-8 rounded-3xl w-full max-w-sm flex flex-col items-center relative overflow-hidden">
         
-        <div class="flex mb-8 border-b border-gray-200 text-xs uppercase tracking-widest font-bold text-gray-400">
-            <button id="tab-login" onclick="switchMode('login')" class="flex-1 pb-2 active-tab">Login</button>
-            <button id="tab-signup" onclick="switchMode('signup')" class="flex-1 pb-2">Create Account</button>
-        </div>
+        <div class="absolute top-[-50px] left-1/2 -translate-x-1/2 w-32 h-32 bg-emerald-500/20 blur-[40px] rounded-full pointer-events-none"></div>
 
-        <div class="space-y-4">
-             <input type="text" id="username" placeholder="Pick a Username" class="hidden w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
-            <input type="text" id="identifier" placeholder="Username or Email" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
-            <input type="password" id="password" placeholder="Password" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono">
-        </div>
+        <h1 class="text-2xl font-black tracking-tight text-[#115e59] mb-1 z-10">GreenCode</h1>
+        <p class="text-[10px] font-bold tracking-widest text-emerald-600/60 uppercase mb-8 z-10">By GILBERTO Systems</p>
 
-        <div class="mt-8 space-y-3">
-            <button id="btn-login" onclick="logIn()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all shadow-md">
-                Enter Dashboard
-            </button>
-            <button id="btn-signup" onclick="signUp()" class="hidden w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all shadow-md">
-                Register Account
-            </button>
-            <button onclick="resetPassword()" class="text-gray-400 hover:text-emerald-700 text-[10px] font-bold uppercase tracking-widest block w-full py-2">
-                Forgot Password?
-            </button>
-        </div>
+        <div class="w-full space-y-4 z-10">
+            <div>
+                <label class="block text-[10px] font-black tracking-widest text-gray-500 uppercase mb-1">Email Address</label>
+                <input type="email" id="authEmail" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono" placeholder="developer@greencode.com">
+            </div>
+            <div>
+                <label class="block text-[10px] font-black tracking-widest text-gray-500 uppercase mb-1">Password</label>
+                <input type="password" id="authPassword" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono" placeholder="••••••••">
+            </div>
 
-        <p id="msg" class="mt-6 text-[10px] font-black uppercase tracking-widest"></p>
+            <p id="authMessage" class="text-[10px] font-bold text-center uppercase tracking-widest hidden"></p>
+
+            <div class="pt-2 flex flex-col gap-2">
+                <button onclick="login()" class="w-full bg-[#115e59] hover:bg-emerald-700 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Access Terminal</button>
+                <button onclick="signUp()" class="w-full bg-white border-2 border-[#115e59] text-[#115e59] hover:bg-emerald-50 font-black py-3 rounded-xl transition-all uppercase tracking-widest text-sm">Register</button>
+            </div>
+        </div>
     </div>
 
-<script>
-    const supabaseUrl = 'https://fadbccudiffeneemlmvb.supabase.co';
-    const supabaseKey = 'sb_publishable__VXBEPzv_zSCuysL-UO02Q_LQ2kHh8z';
-    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    <script>
+        // Initialize Supabase (Matches your app.js credentials)
+        const supabaseUrl = 'https://fadbccudiffeneemlmvb.supabase.co';
+        const supabaseKey = 'sb_publishable__VXBEPzv_zSCuysL-UO02Q_LQ2kHh8z';
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-    const identifierInput = document.getElementById('identifier');
-    const usernameInput = document.getElementById('username');
-    const passwordInput = document.getElementById('password');
-    const msgEl = document.getElementById('msg');
+        function showMessage(msg, isError) {
+            const msgEl = document.getElementById('authMessage');
+            msgEl.textContent = msg;
+            msgEl.className = `text-[10px] font-bold text-center uppercase tracking-widest mt-2 ${isError ? 'text-red-500' : 'text-emerald-600'}`;
+            msgEl.classList.remove('hidden');
+        }
 
-    function switchMode(mode) {
-        const isLogin = mode === 'login';
-        document.getElementById('tab-login').className = isLogin ? 'flex-1 pb-2 active-tab' : 'flex-1 pb-2';
-        document.getElementById('tab-signup').className = !isLogin ? 'flex-1 pb-2 active-tab' : 'flex-1 pb-2';
-        
-        usernameInput.classList.toggle('hidden', isLogin);
-        identifierInput.placeholder = isLogin ? "Username or Email" : "Email Address";
-        
-        document.getElementById('btn-login').classList.toggle('hidden', !isLogin);
-        document.getElementById('btn-signup').classList.toggle('hidden', isLogin);
-    }
+        async function login() {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
 
-    function showMessage(text, isError = false) {
-        msgEl.innerText = text;
-        msgEl.className = `mt-6 text-[10px] font-black uppercase tracking-widest ${isError ? 'text-red-500' : 'text-emerald-600'}`;
-    }
+            if (!email || !password) return showMessage("Please enter email and password.", true);
+            
+            showMessage("Authenticating...", false);
 
-    async function signUp() {
-    const username = usernameInput.value; // Used as a display name
-    const email = identifierInput.value; // Now strictly used as email
-    const password = passwordInput.value;
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-    showMessage("Creating account...", false);
+            if (error) {
+                showMessage(error.message, true);
+            } else {
+                showMessage("Access Granted. Redirecting...", false);
+                // Redirect to the newly renamed dashboard!
+                setTimeout(() => window.location.href = 'dashboard.html', 500);
+            }
+        }
 
-    // 1. Create the Auth User
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-    });
+        async function signUp() {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
 
-    if (error) return showMessage(error.message, true);
+            if (!email || !password) return showMessage("Please enter email and password.", true);
 
-    // 2. Save the Display Name to Profiles
-    const { error: profileError } = await supabaseClient
-        .from('profiles')
-        .insert([{ id: data.user.id, username: username, email: email }]);
+            showMessage("Registering User...", false);
 
-    if (profileError) console.error("Profile error:", profileError);
-    
-    // Redirect instantly since Confirm Email is OFF
-    window.location.href = 'index.html';
-}
+            const { data, error } = await supabaseClient.auth.signUp({ email, password });
 
-async function logIn() {
-    const email = identifierInput.value;
-    const password = passwordInput.value;
-
-    showMessage("Authenticating...", false);
-
-    // Simple Email Login
-    const { error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password,
-    });
-
-    if (error) showMessage(error.message, true);
-    else window.location.href = 'index.html';
-}
-
-    async function resetPassword() {
-        if (!identifierInput.value) return showMessage("Input email first.", true);
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(identifierInput.value);
-        if (error) showMessage(error.message, true);
-        else showMessage("Reset link sent!", false);
-    }
-</script>
+            if (error) {
+                showMessage(error.message, true);
+            } else {
+                showMessage("Registration successful! You may now log in.", false);
+            }
+        }
+    </script>
 </body>
 </html>
