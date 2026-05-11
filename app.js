@@ -17,7 +17,21 @@ let energyChart;
 let activeWorkers = []; 
 let globalHistoryData = []; 
 
-window.onload = function() {
+// ============================================================================
+// THE BOUNCER: SUPABASE AUTH GUARD
+// ============================================================================
+window.onload = async function() {
+    // 1. Check if the user has a valid login ticket
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    
+    // 2. If no session exists, kick them back to the login page
+    if (!session) {
+        console.warn("Unauthorized access attempt. Redirecting to login...");
+        window.location.href = 'index.html'; 
+        return; 
+    }
+
+    // 3. If they are logged in, load the dashboard features normally!
     setupChart();
     setupDragAndDrop();
 };
@@ -757,7 +771,7 @@ async function updateProfile() {
 
 async function logoutUser() {
     await supabaseClient.auth.signOut();
-    window.location.href = 'login.html';
+    window.location.href = 'index.html';
 }
 
 async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
