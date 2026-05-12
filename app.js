@@ -1,15 +1,15 @@
 // app.js
 
-// ============================================================================
-// 1. SUPABASE CONFIGURATION & UI STATE
-// ============================================================================
-//  Connects the app to your cloud database and sets up the 
-// variables that control the user interface (files, charts, and loading states).
-
+// ==========================================
+// SUPABASE CONFIGURATION
+// ==========================================
 const supabaseUrl = 'https://fadbccudiffeneemlmvb.supabase.co';
 const supabaseKey = 'sb_publishable__VXBEPzv_zSCuysL-UO02Q_LQ2kHh8z';
 const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
+// ==========================================
+// STATE MANAGEMENT & CONSTANTS
+// ==========================================
 let uploadedFiles = []; 
 let analysisResults = []; 
 let currentDetailIndex = 0; 
@@ -17,68 +17,78 @@ let energyChart;
 let activeWorkers = []; 
 let globalHistoryData = []; 
 
-// ============================================================================
-// THE BOUNCER: SUPABASE AUTH GUARD
-// ============================================================================
-window.onload = async function() {
-    // 1. Check if the user has a valid login ticket
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    
-    // 2. If no session exists, kick them back to the login page
-    if (!session) {
-        console.warn("Unauthorized access attempt. Redirecting to login...");
-        window.location.href = 'index.html'; 
-        return; 
-    }
-
-    // 3. If they are logged in, load the dashboard features normally!
-    setupChart();
-    setupDragAndDrop();
-};
-
-
-// ============================================================================
-// 2. ILEM HEURISTIC CONSTANTS
-// ============================================================================
-// These are the exact physics constants derived from
-// Instruction-Level Energy Model research. They act as the multipliers for 
-// the heuristic algorithm to convert software behavior into physical Joules.
-
 const C_CPU = 1.5e-9;
 const C_MEM = 2.25e-9;
 const C_BASE = 0.0005;
 
+window.onload = function() {
+    setupChart();
+    setupDragAndDrop();
+};
 
-// ============================================================================
-// 3. LEXICAL ANALYZER (CODE INTERCEPTION)
-// ============================================================================
-// This represents the O(n) Linear Scan mentioned in the paper.
-// It reads the user's Python code line-by-line and dynamically injects 
-// telemetry trackers (__tracker['ops'] += 1) before sending it to the sandbox.
+// ==========================================
+// DRAG AND DROP & FILE HANDLING
+// ==========================================
+function setupDragAndDrop() {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileUpload');
 
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
+    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dropzone-active'); });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dropzone-active');
+        handleFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+}
+
+async function handleFiles(files) {
+    uploadedFiles = []; 
+    for (let file of files) {
+        if (file.name.endsWith('.py')) {
+            const text = await file.text();
+            uploadedFiles.push({ name: file.name, content: text });
+        }
+    }
+    
+    const countDisplay = document.getElementById('fileCountDisplay');
+    if (countDisplay) countDisplay.innerText = `${uploadedFiles.length} file(s) ready for analysis.`;
+
+    const previewList = document.getElementById('filePreviewList');
+    if (previewList) {
+        previewList.innerHTML = ''; 
+        uploadedFiles.forEach(file => {
+            previewList.innerHTML += `
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
+                    📄 ${file.name}
+                </span>`;
+        });
+    }
+
+    logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
+}
+
+// ==========================================
+// LEXICAL ANALYSIS & WORKER EXECUTION
+// ==========================================
 function instrumentPythonCodeJS(rawCode) {
     const lines = rawCode.split('\n');
-    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "line_ops": {}, "line_memory": {}, "active_line": 0}'];
+    // FIXED: Added "last_sync": 0 to the tracker for the worker throttle
+    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0}'];
     
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
-        let lineNum = i + 1;
         
-        // Proxy Injection: Replaces standard lists with GreenList
         if (line.match(/=\s*\[(.*?)\]/)) {
             line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
         }
         
-        // Inject active line tracker for Memory Tracing
-        let indentMatch = line.match(/^(\s*)/);
-        let currentIndent = indentMatch ? indentMatch[1] : "";
-        if (line.trim() !== "" && !line.trim().startsWith("#") && !line.trim().startsWith("def ") && !line.trim().startsWith("class ")) {
-            instrumentedCode.push(currentIndent + `__tracker['active_line'] = ${lineNum}`);
-        }
-        
         instrumentedCode.push(line);
         
-        // Loop Injection: Tracks overall Ops and Line-Specific Ops
         if (line.match(/^\s*(for|while|def)\b.*:/)) {
             let nextLineIndent = "    "; 
             for (let j = i + 1; j < lines.length; j++) {
@@ -90,21 +100,11 @@ function instrumentPythonCodeJS(rawCode) {
                 }
             }
             instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
-            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'].setdefault(${lineNum}, 0)`);
-            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'][${lineNum}] += 1`);
             instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
         }
     }
     return instrumentedCode.join('\n');
 }
-
-
-// ============================================================================
-// 4. WEB WORKER MANAGEMENT (SANDBOXING)
-// ============================================================================
-// This handles the isolated Pyodide WebAssembly threads. 
-// It safely runs the instrumented Python code in the background so it doesn't 
-// crash the user's main browser tab.
 
 function runWorkerTask(scriptName, rawCode, onTelemetry) {
     return new Promise((resolve, reject) => {
@@ -114,11 +114,10 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
         const instrumented = instrumentPythonCodeJS(rawCode);
 
         worker.onmessage = function(e) {
-            // Catch the line_ops and line_mem from the worker event
-            const { type, data, error, ops, mem, line_ops, line_mem } = e.data; 
-
+            const { type, data, error, ops, mem } = e.data;
+            
             if (type === "TELEMETRY") {
-                if (onTelemetry) onTelemetry(ops, mem, line_ops, line_mem);
+                if (onTelemetry) onTelemetry(ops, mem); 
             } else if (type === "READY") {
                 worker.postMessage({ userCode: instrumented });
             } else if (type === "RESULT") {
@@ -151,14 +150,29 @@ function forceStopWorkers() {
     updateStatus("SYSTEM IDLE", "text-emerald-300");
 }
 
+// ==========================================
+// ANALYSIS TRIGGER BUTTONS
+// ==========================================
+async function runEditorAnalysis() {
+    const code = document.getElementById('codeInput').value;
+    if (!code) return logToTerminal("Editor is empty.", "WARN");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal("Starting Editor Analysis...", "INFO");
+    await executeBatch([{ name: "editor_script.py", content: code }]);
+}
 
-// ============================================================================
-// 5. CORE HEURISTIC ESTIMATION ALGORITHM (THE MATH)
-// ============================================================================
-// This is the heart of the system. It receives the raw Ops and 
-// Peak Memory from the Worker, applies the Linear Weighted Heuristic Formula, 
-// and outputs the final Thermodynamic Joules.
+async function runFileAnalysis() {
+    if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
+    await executeBatch(uploadedFiles);
+}
 
+// ==========================================
+// REAL-TIME BATCH EXECUTION
+// ==========================================
 async function executeBatch(scriptArray) {
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
@@ -179,9 +193,7 @@ async function executeBatch(scriptArray) {
     analysisResults = scriptArray.map(script => ({
         name: script.name,
         content: script.content, 
-        ops: 0, bytes: 0, joules: 0, kwh: 0, error: null,
-        duration: 0, cpu_joules: 0, mem_joules: 0, base_joules: C_BASE,
-        line_ops: {}, line_memory: {}, 
+        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, error: null,
         status: 'RUNNING', 
         history: Array(25).fill(0) 
     }));
@@ -208,32 +220,27 @@ async function executeBatch(scriptArray) {
     logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
     const startTime = Date.now();
 
-   try {
+    try {
         const tasks = scriptArray.map((script, index) => {
-            // Accept the JSON strings from the worker
-            return runWorkerTask(script.name, script.content, (ops, mem, line_ops_str, line_mem_str) => {
-                const res = analysisResults[index];
-                const t_exec = (Date.now() - startTime) / 1000;
-                
-                res.ops = ops;
-                res.bytes = mem;
+            return runWorkerTask(script.name, script.content, (ops, mem) => {
+            const res = analysisResults[index];
+            const t_exec = (Date.now() - startTime) / 1000;
+            
+            res.ops = ops;
+            res.bytes = mem;
 
-                // --- SAVE THE TRACES LIVE SO FORCE STOP DOESNT DELETE THEM! ---
-                if (line_ops_str) res.line_ops = JSON.parse(line_ops_str);
-                if (line_mem_str) res.line_memory = JSON.parse(line_mem_str);
+            res.cpu_joules = res.ops * C_CPU;
+            res.mem_joules = res.bytes * t_exec * C_MEM;
 
-                // --- LIVE HEURISTIC CALCULATION ---
-                res.cpu_joules = res.ops * C_CPU;
-                res.mem_joules = res.bytes * t_exec * C_MEM;
-                res.joules = res.cpu_joules + res.mem_joules + res.base_joules;
-                res.kwh = res.joules / 3600000;
-                // ----------------------------------
+            // FIXED: Using C_BASE constant to prevent UI crash
+            res.joules = res.cpu_joules + res.mem_joules + C_BASE;
+            res.kwh = res.joules / 3600000;
 
-                res.history.shift();
-                res.history.push(ops);
+            res.history.shift();
+            res.history.push(ops);
 
-                updateTableRow(index, res);
-                if (currentDetailIndex === index) updateLiveUI(res);
+            updateTableRow(index, res);
+            if (currentDetailIndex === index) updateLiveUI(res);
             });
         });
 
@@ -254,25 +261,23 @@ async function executeBatch(scriptArray) {
                 }
 
             } else {
-                resState.status = 'SUCCESS';
+                resState.status = 'COMPLETED'; 
                 resState.ops = finalRes.ops || resState.ops;
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
                 resState.duration = finalRes.duration_sec || ((Date.now() - startTime) / 1000);
-                
-                resState.line_ops = finalRes.line_ops || {};
-                resState.line_memory = finalRes.line_memory || {};
 
-                // --- FINAL HEURISTIC CALCULATION ---
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
-                resState.joules = resState.cpu_joules + resState.mem_joules + resState.base_joules;
+
+                // FIXED: Using C_BASE constant
+                resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
                 resState.kwh = resState.joules / 3600000;
-                // -----------------------------------
                 
                 resState.history.shift();
                 resState.history.push(resState.ops);
 
                 logToTerminal(`[${resState.name}] Success: ${resState.ops} Ops`, "SUCCESS");
+                
                 await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
             }
         }
@@ -287,14 +292,89 @@ async function executeBatch(scriptArray) {
     }
 }
 
+// ==========================================
+// UI RENDERING & LIVE UPDATES
+// ==========================================
+function renderAnalysisTable() {
+    const tbody = document.getElementById('analysisTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = "";
 
-// ============================================================================
-// 6. STATIC CODE PROFILER (SUGGESTIONS GENERATOR)
-// ============================================================================
-// Instead of running the code, this algorithm scans the raw 
-// text for known "Energy Anti-Patterns" (like reading huge files to RAM) 
-// and generates the recommendations in the right-hand panel.
+    analysisResults.forEach((res, index) => {
+        const bgClass = index % 2 === 0 ? "bg-white" : "bg-gray-50";
+        tbody.innerHTML += `
+            <tr id="row-${index}" class="${bgClass} border-b border-gray-100 cursor-pointer hover:bg-emerald-50" onclick="jumpToDetail(${index})">
+                <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
+                <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
+                <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
+                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${res.joules.toFixed(6)} J</td>
+                <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
+            </tr>
+        `;
+    });
+}
 
+function updateTableRow(index, res) {
+    const row = document.getElementById(`row-${index}`);
+    if (row) {
+        row.querySelector('.op-cell').innerText = `${res.ops} Ops`;
+        row.querySelector('.byte-cell').innerText = `${res.bytes} B`;
+        row.querySelector('.joule-cell').innerText = `${res.joules.toFixed(6)} J`;
+        row.querySelector('.kwh-cell').innerText = `${res.kwh.toExponential(3)} kWh`;
+    }
+}
+
+function updateLiveUI(res) {
+    document.getElementById('detailJoules').innerText = `${res.joules.toFixed(6)} J`;
+    document.getElementById('detailOps').innerText = res.ops;
+
+    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
+    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
+    
+    // FIXED: Formats C_BASE constant properly
+    document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
+
+    if (energyChart) {
+        energyChart.data.datasets[0].data = res.history;
+        energyChart.update('none'); 
+    }
+}
+
+function updateCarouselUI() {
+    if (analysisResults.length === 0) return;
+    const current = analysisResults[currentDetailIndex];
+
+    const filenameEl = document.getElementById('detailFilename');
+    filenameEl.innerText = current.name;
+    filenameEl.classList.remove('text-gray-400');
+    filenameEl.classList.add('text-gray-800');
+
+    updateLiveUI(current);
+    generateSuggestions(current); 
+}
+
+function prevDetail() {
+    if (currentDetailIndex > 0) {
+        currentDetailIndex--;
+        updateCarouselUI();
+    }
+}
+
+function nextDetail() {
+    if (currentDetailIndex < analysisResults.length - 1) {
+        currentDetailIndex++;
+        updateCarouselUI();
+    }
+}
+
+function jumpToDetail(index) {
+    currentDetailIndex = index;
+    updateCarouselUI();
+}
+
+// ==========================================
+// ANALYSIS ENGINE: PURE REGEX / TELEMETRY
+// ==========================================
 function generateSuggestions(data) {
     const suggestionEl = document.getElementById('suggestionText');
     let htmlContent = "";
@@ -354,170 +434,9 @@ function generateSuggestions(data) {
     suggestionEl.innerHTML = htmlContent + `</ul>`;
 }
 
-
-// ============================================================================
-// 7. UI, VISUALIZATION & USER INPUTS
-// ============================================================================
-// This section handles the buttons, the Chart.js graph updates, 
-// and rendering the Line-by-Line dropdown traces on the dashboard.
-
-function updateLiveUI(res) {
-    document.getElementById('detailJoules').innerText = `${res.joules.toFixed(6)} J`;
-    document.getElementById('detailOps').innerText = res.ops;
-
-    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
-    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
-    document.getElementById('breakdownBase').innerText = `${res.base_joules.toFixed(6)} J`;
-
-    let cpuHtml = "";
-    if (Object.keys(res.line_ops).length === 0) cpuHtml = `<p class="opacity-50 italic">No computational loops detected.</p>`;
-    else {
-        for (const [line, ops] of Object.entries(res.line_ops)) {
-            let j = (ops * C_CPU).toFixed(6);
-            cpuHtml += `<div class="flex justify-between border-b border-blue-800/50 py-1"><span>Line ${line}: <span class="text-blue-200">${ops.toLocaleString()} Ops</span></span><span class="font-bold text-emerald-300">${j} J</span></div>`;
-        }
-    }
-    const cpuLineDetails = document.getElementById('cpuLineDetails');
-    if(cpuLineDetails) cpuLineDetails.innerHTML = cpuHtml;
-
-    let memHtml = "";
-    if (Object.keys(res.line_memory).length === 0) memHtml = `<p class="opacity-50 italic">No dynamic list allocations detected.</p>`;
-    else {
-        for (const [line, bytes] of Object.entries(res.line_memory)) {
-            let j = (bytes * res.duration * C_MEM).toFixed(6);
-            memHtml += `<div class="flex justify-between border-b border-purple-800/50 py-1"><span>Line ${line}: <span class="text-purple-200">${bytes.toLocaleString()} B</span></span><span class="font-bold text-emerald-300">${j} J</span></div>`;
-        }
-    }
-    const memLineDetails = document.getElementById('memLineDetails');
-    if(memLineDetails) memLineDetails.innerHTML = memHtml;
-
-    if (energyChart) {
-        energyChart.data.datasets[0].data = res.history;
-        energyChart.update('none'); 
-    }
-}
-
-async function runEditorAnalysis() {
-    const code = document.getElementById('codeInput').value;
-    if (!code) return logToTerminal("Editor is empty.", "WARN");
-    
-    document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal("Starting Editor Analysis...", "INFO");
-    await executeBatch([{ name: "editor_script.py", content: code }]);
-}
-
-async function runFileAnalysis() {
-    if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
-    
-    document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
-    await executeBatch(uploadedFiles);
-}
-
-function setupDragAndDrop() {
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileUpload');
-
-    if (!dropzone || !fileInput) return;
-
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
-    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dropzone-active'); });
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dropzone-active');
-        handleFiles(e.dataTransfer.files);
-    });
-
-    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
-}
-
-async function handleFiles(files) {
-    uploadedFiles = []; 
-    for (let file of files) {
-        if (file.name.endsWith('.py')) {
-            const text = await file.text();
-            uploadedFiles.push({ name: file.name, content: text });
-        }
-    }
-    
-    const countDisplay = document.getElementById('fileCountDisplay');
-    if (countDisplay) countDisplay.innerText = `${uploadedFiles.length} file(s) ready for analysis.`;
-
-    const previewList = document.getElementById('filePreviewList');
-    if (previewList) {
-        previewList.innerHTML = ''; 
-        uploadedFiles.forEach(file => {
-            previewList.innerHTML += `
-                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
-                    📄 ${file.name}
-                </span>`;
-        });
-    }
-
-    logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
-}
-
-function renderAnalysisTable() {
-    const tbody = document.getElementById('analysisTableBody');
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    analysisResults.forEach((res, index) => {
-        const bgClass = index % 2 === 0 ? "bg-white" : "bg-gray-50";
-        tbody.innerHTML += `
-            <tr id="row-${index}" class="${bgClass} border-b border-gray-100 cursor-pointer hover:bg-emerald-50" onclick="jumpToDetail(${index})">
-                <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
-                <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
-                <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
-                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${res.joules.toFixed(6)} J</td>
-                <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
-            </tr>
-        `;
-    });
-}
-
-function updateTableRow(index, res) {
-    const row = document.getElementById(`row-${index}`);
-    if (row) {
-        row.querySelector('.op-cell').innerText = `${res.ops} Ops`;
-        row.querySelector('.byte-cell').innerText = `${res.bytes} B`;
-        row.querySelector('.joule-cell').innerText = `${res.joules.toFixed(6)} J`;
-        row.querySelector('.kwh-cell').innerText = `${res.kwh.toExponential(3)} kWh`;
-    }
-}
-
-function updateCarouselUI() {
-    if (analysisResults.length === 0) return;
-    const current = analysisResults[currentDetailIndex];
-
-    const filenameEl = document.getElementById('detailFilename');
-    filenameEl.innerText = current.name;
-    filenameEl.classList.remove('text-gray-400');
-    filenameEl.classList.add('text-gray-800');
-
-    updateLiveUI(current);
-    generateSuggestions(current); 
-}
-
-function prevDetail() {
-    if (currentDetailIndex > 0) {
-        currentDetailIndex--;
-        updateCarouselUI();
-    }
-}
-
-function nextDetail() {
-    if (currentDetailIndex < analysisResults.length - 1) {
-        currentDetailIndex++;
-        updateCarouselUI();
-    }
-}
-
-function jumpToDetail(index) {
-    currentDetailIndex = index;
-    updateCarouselUI();
-}
-
+// ==========================================
+// UTILITIES, CHART & DATABASE
+// ==========================================
 function setupChart() {
     const ctx = document.getElementById('energyChart');
     if (!ctx) return;
@@ -577,13 +496,6 @@ function switchTab(tabName) {
     if (tabName === 'profile') loadProfileData(); 
 }
 
-
-// ============================================================================
-// 8. DATABASE, HISTORY & DATA EXPORT (SUPABASE)
-// ============================================================================
-// This handles pushing the final Joules up to the Supabase 
-// cloud, pulling them down for the History tab, and generating the CSV files.
-
 async function loadProfileData() {
     const usernameEl = document.getElementById('profileUsername');
     const emailEl = document.getElementById('profileEmail');
@@ -613,6 +525,9 @@ async function loadProfileData() {
     }
 }
 
+// ==========================================
+// HISTORY FETCHING & SEARCHING
+// ==========================================
 async function fetchAccountHistory() {
     const tableBody = document.getElementById('dbHistoryTableBody');
     if(!tableBody) return;
@@ -640,6 +555,22 @@ async function fetchAccountHistory() {
         tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-red-500 italic font-bold">Error connecting to database.</td></tr>';
         console.error("Supabase fetch error:", e);
     }
+}
+
+function searchHistory() {
+    const query = document.getElementById('historySearch').value.toLowerCase();
+    
+    if (!query) {
+        renderHistoryTable(globalHistoryData);
+        return;
+    }
+    
+    const filteredData = globalHistoryData.filter(row => {
+        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
+        return filename.includes(query);
+    });
+    
+    renderHistoryTable(filteredData);
 }
 
 function renderHistoryTable(dataToRender) {
@@ -726,22 +657,6 @@ function toggleSelectGroup(masterCheckbox, groupKey) {
     checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
 }
 
-function searchHistory() {
-    const query = document.getElementById('historySearch').value.toLowerCase();
-    
-    if (!query) {
-        renderHistoryTable(globalHistoryData);
-        return;
-    }
-    
-    const filteredData = globalHistoryData.filter(row => {
-        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
-        return filename.includes(query);
-    });
-    
-    renderHistoryTable(filteredData);
-}
-
 async function updateProfile() {
     const newPassword = document.getElementById('newPassword').value;
     const msgElement = document.getElementById('profileMsg');
@@ -771,7 +686,7 @@ async function updateProfile() {
 
 async function logoutUser() {
     await supabaseClient.auth.signOut();
-    window.location.href = 'index.html';
+    window.location.href = 'login.html';
 }
 
 async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
@@ -798,6 +713,9 @@ async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
     }
 }
 
+// ==========================================
+// CSV EXPORT & BATCH DELETION
+// ==========================================
 function exportSelectedCSV() {
     const checkboxes = document.querySelectorAll('.history-checkbox:checked');
     if (checkboxes.length === 0) return alert("Please select at least one record to export.");
