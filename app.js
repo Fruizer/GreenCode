@@ -77,14 +77,14 @@ async function handleFiles(files) {
 // ==========================================
 function instrumentPythonCodeJS(rawCode) {
     const lines = rawCode.split('\n');
-    // FIXED: Added "last_sync": 0 to the tracker for the worker throttle
-    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0}'];
+    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0, "line_ops": {}, "line_mem": {}}'];
     
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
+        const lineNum = i + 1; 
         
         if (line.match(/=\s*\[(.*?)\]/)) {
-            line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
+            line = line.replace(/=\s*\[(.*?)\]/g, `= GreenList(${lineNum}, [$1])`);
         }
         
         instrumentedCode.push(line);
@@ -99,6 +99,7 @@ function instrumentPythonCodeJS(rawCode) {
                     break;
                 }
             }
+            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'][${lineNum}] = __tracker['line_ops'].get(${lineNum}, 0) + 1`);
             instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
             instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
         }
@@ -114,10 +115,10 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
         const instrumented = instrumentPythonCodeJS(rawCode);
 
         worker.onmessage = function(e) {
-            const { type, data, error, ops, mem } = e.data;
+            const { type, data, error, ops, mem, line_ops, line_mem } = e.data;
             
             if (type === "TELEMETRY") {
-                if (onTelemetry) onTelemetry(ops, mem); 
+                if (onTelemetry) onTelemetry(ops, mem, line_ops, line_mem); 
             } else if (type === "READY") {
                 worker.postMessage({ userCode: instrumented });
             } else if (type === "RESULT") {
@@ -126,7 +127,7 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
             } else if (type === "ERROR") {
                 cleanupWorker(worker);
                 if (error.includes("Boot Failed") || error.includes("404")) reject(error); 
-                else resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: error }}); 
+                else resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, line_ops: {}, line_mem: {}, error: error }}); 
             }
         };
         worker.onerror = (err) => { cleanupWorker(worker); reject(err.message); };
@@ -142,7 +143,7 @@ function forceStopWorkers() {
     if (activeWorkers.length === 0) return;
     activeWorkers.forEach(w => {
         w.worker.terminate();
-        w.resolve({ name: w.name, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: "USER FORCED STOP - Execution Terminated." }});
+        w.resolve({ name: w.name, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, line_ops: {}, line_mem: {}, error: "USER FORCED STOP - Execution Terminated." }});
     });
     activeWorkers = []; 
     logToTerminal("SYSTEM FORCED STOP. All background threads killed.", "WARN");
@@ -195,7 +196,9 @@ async function executeBatch(scriptArray) {
         content: script.content, 
         ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, error: null,
         status: 'RUNNING', 
-        history: Array(25).fill(0) 
+        history: Array(25).fill(0),
+        line_ops: {},
+        line_mem: {}
     }));
     
     currentDetailIndex = 0;
@@ -222,25 +225,26 @@ async function executeBatch(scriptArray) {
 
     try {
         const tasks = scriptArray.map((script, index) => {
-            return runWorkerTask(script.name, script.content, (ops, mem) => {
-            const res = analysisResults[index];
-            const t_exec = (Date.now() - startTime) / 1000;
-            
-            res.ops = ops;
-            res.bytes = mem;
+            return runWorkerTask(script.name, script.content, (ops, mem, worker_line_ops, worker_line_mem) => {
+                const res = analysisResults[index];
+                const t_exec = (Date.now() - startTime) / 1000;
+                
+                res.ops = ops;
+                res.bytes = mem;
+                res.line_ops = worker_line_ops || res.line_ops;
+                res.line_mem = worker_line_mem || res.line_mem;
 
-            res.cpu_joules = res.ops * C_CPU;
-            res.mem_joules = res.bytes * t_exec * C_MEM;
+                res.cpu_joules = res.ops * C_CPU;
+                res.mem_joules = res.bytes * t_exec * C_MEM;
 
-            // FIXED: Using C_BASE constant to prevent UI crash
-            res.joules = res.cpu_joules + res.mem_joules + C_BASE;
-            res.kwh = res.joules / 3600000;
+                res.joules = res.cpu_joules + res.mem_joules + C_BASE;
+                res.kwh = res.joules / 3600000;
 
-            res.history.shift();
-            res.history.push(ops);
+                res.history.shift();
+                res.history.push(ops);
 
-            updateTableRow(index, res);
-            if (currentDetailIndex === index) updateLiveUI(res);
+                updateTableRow(index, res);
+                if (currentDetailIndex === index) updateLiveUI(res);
             });
         });
 
@@ -264,12 +268,13 @@ async function executeBatch(scriptArray) {
                 resState.status = 'COMPLETED'; 
                 resState.ops = finalRes.ops || resState.ops;
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
+                resState.line_ops = finalRes.line_ops || resState.line_ops;
+                resState.line_mem = finalRes.line_mem || resState.line_mem;
                 resState.duration = finalRes.duration_sec || ((Date.now() - startTime) / 1000);
 
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
 
-                // FIXED: Using C_BASE constant
                 resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
                 resState.kwh = resState.joules / 3600000;
                 
@@ -331,12 +336,39 @@ function updateLiveUI(res) {
     document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
     document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
     
-    // FIXED: Formats C_BASE constant properly
     document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
 
     if (energyChart) {
         energyChart.data.datasets[0].data = res.history;
         energyChart.update('none'); 
+    }
+
+    // Render CPU Trace
+    const cpuTraceEl = document.getElementById('cpuTraceContent');
+    if (cpuTraceEl && res.line_ops) {
+        cpuTraceEl.innerHTML = Object.entries(res.line_ops)
+            .map(([line, count]) => {
+                const lineJoules = (count * C_CPU).toFixed(6);
+                return `<div class="flex justify-between items-center mb-1">
+                            <span>Line ${line}: ${count.toLocaleString()} Ops</span>
+                            <span class="text-blue-300 font-black">${lineJoules} J</span>
+                        </div>`;
+            }).join('') || 'No looping trace detected.';
+    }
+
+    // Render Memory Trace
+    const memTraceEl = document.getElementById('memTraceContent');
+    if (memTraceEl && res.line_mem) {
+        memTraceEl.innerHTML = Object.entries(res.line_mem)
+            .map(([line, bytes]) => {
+                // Fallback to 1 second if duration isn't finalized yet during live telemetry
+                const t_exec = res.duration || 1; 
+                const memJoules = (bytes * t_exec * C_MEM).toFixed(6);
+                return `<div class="flex justify-between items-center mb-1">
+                            <span>Line ${line}: ${bytes.toLocaleString()} Bytes</span>
+                            <span class="text-purple-300 font-black">${memJoules} J</span>
+                        </div>`;
+            }).join('') || 'No array allocation trace detected.';
     }
 }
 
