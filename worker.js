@@ -1,6 +1,5 @@
 // worker.js
 
-// 1. Pull the Pyodide engine from the CDN instead of a local folder
 try {
     importScripts("https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"); 
 } catch (e) {
@@ -9,14 +8,18 @@ try {
 
 let pyodideEngine = null;
 
-// Expose a telemetry function to the Python environment
-self.sendTelemetry = (ops, peak_mem) => {
-    postMessage({ type: "TELEMETRY", ops: ops, mem: peak_mem });
+self.sendTelemetry = (ops, peak_mem, line_ops_str, line_mem_str) => {
+    postMessage({ 
+        type: "TELEMETRY", 
+        ops: ops, 
+        mem: peak_mem,
+        line_ops: line_ops_str ? JSON.parse(line_ops_str) : {},
+        line_mem: line_mem_str ? JSON.parse(line_mem_str) : {}
+    });
 };
 
 async function loadPyodideEngine() {
     try {
-        // 2. Initialize it using the CDN's index URL
         pyodideEngine = await loadPyodide({ 
             indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/" 
         });
@@ -45,7 +48,6 @@ MAX_OUTPUT_CHARS = 50000
 output_capture = io.StringIO()
 sys.stdout = output_capture
 
-# Input Automation
 input_counter = 0
 def automated_input(prompt=""):
     global input_counter
@@ -57,49 +59,52 @@ start_time = time.time()
 error_msg = ""
 final_ops = 0
 final_peak_mem = 0
+final_line_ops = {}
+final_line_mem = {}
 
 try:
     sys.setrecursionlimit(5000)
     
-    # FIXED: Added import time and the 50ms throttle check
     proxy_definitions = """
 import js  
 import time
+import json
 
 def _check_telemetry():
-    # Only check the system clock every 100 ops to keep overhead low
     if __tracker['ops'] % 100 == 0:
         current_time = time.time()
-        # Only send data to frontend a maximum of once every 50ms
         if current_time - __tracker['last_sync'] > 0.05:
-            js.sendTelemetry(__tracker['ops'], __tracker['peak_mem'])
+            js.sendTelemetry(__tracker['ops'], __tracker['peak_mem'], json.dumps(__tracker['line_ops']), json.dumps(__tracker['line_mem']))
             __tracker['last_sync'] = current_time
 
-def _update_mem(bytes_added):
+def _update_mem(bytes_added, line_num=None):
     global __tracker
     __tracker['current_mem'] += bytes_added
     if __tracker['current_mem'] > __tracker['peak_mem']:
         __tracker['peak_mem'] = __tracker['current_mem']
+    if line_num is not None and bytes_added > 0:
+        __tracker['line_mem'][line_num] = __tracker['line_mem'].get(line_num, 0) + bytes_added
 
 class GreenList(list):
-    def __init__(self, *args):
+    def __init__(self, line_num, *args):
         super().__init__(*args)
+        self.line_num = line_num
         self._size = 56 + (len(self) * 8)
-        _update_mem(self._size)
+        _update_mem(self._size, self.line_num)
         
     def append(self, item):
         super().append(item)
-        _update_mem(8)
+        _update_mem(8, getattr(self, 'line_num', None))
         
     def pop(self, index=-1):
         if len(self) > 0:
-            _update_mem(-8)
+            _update_mem(-8, getattr(self, 'line_num', None))
         return super().pop(index)
         
     def clear(self):
         freed_bytes = len(self) * 8
         super().clear()
-        _update_mem(-freed_bytes)
+        _update_mem(-freed_bytes, getattr(self, 'line_num', None))
 """
 
     full_code = proxy_definitions + "\\n" + ${JSON.stringify(userCode)}
@@ -114,6 +119,8 @@ class GreenList(list):
     if '__tracker' in exec_globals:
         final_ops = exec_globals['__tracker'].get('ops', 0)
         final_peak_mem = exec_globals['__tracker'].get('peak_mem', 0)
+        final_line_ops = exec_globals['__tracker'].get('line_ops', {})
+        final_line_mem = exec_globals['__tracker'].get('line_mem', {})
 
 except Exception as e:
     error_msg = str(e)
@@ -127,7 +134,9 @@ result = {
     "error": error_msg,
     "ops": final_ops, 
     "memory_peak_bytes": final_peak_mem, 
-    "duration_sec": end_time - start_time
+    "duration_sec": end_time - start_time,
+    "line_ops": final_line_ops,
+    "line_mem": final_line_mem
 }
 json.dumps(result)
 `;
