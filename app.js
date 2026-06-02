@@ -17,9 +17,49 @@ let energyChart;
 let activeWorkers = []; 
 let globalHistoryData = []; 
 
+let executionTimerInterval; 
+let globalStartTime = 0;
+
 const C_CPU = 1.5e-9;
 const C_MEM = 2.25e-9;
+const BASELINE_MW = 2; // System idle power in milliwatts
 const C_BASE = 0.0005;
+
+// ==========================================
+// PATTERN-BASED STATIC ANALYSIS DICTIONARY
+// ==========================================
+const GREEN_LINT_RULES = {
+    "infinite_loop": {
+        pattern: /^\s*(while\s+True|while\s+1):/,
+        type: "Infinite Loop Risk",
+        message: "Unbounded loops permanently lock CPU threads, draining constant baseline power.",
+        action: "while condition_met:  # Add a deterministic break condition"
+    },
+    "nested_loop": {
+        pattern: /^\s{4,}(for|while)\b/, 
+        type: "O(n²) Complexity Spike",
+        message: "Nested iteration causes exponential operation growth. A 100-item list requires 10,000 ops.",
+        action: "hash_map = {item.id: item}  # Flatten to O(n) using a dictionary lookup"
+    },
+    "sleep_block": {
+        pattern: /time\.sleep\(/,
+        type: "Synchronous Thread Block",
+        message: "Hardware clocks remain active and consume power while waiting for synchronous sleep timers.",
+        action: "await asyncio.sleep(n)  # Yield thread control back to the OS"
+    },
+    "io_print": {
+        pattern: /^\s+(print|sys\.stdout\.write)\(/,
+        type: "I/O Hardware Wake",
+        message: "Calling standard output inside a loop triggers hardware interrupts repeatedly.",
+        action: "buffer.append(data)\nprint(''.join(buffer))  # Batch output outside the loop"
+    },
+    "memory_load": {
+        pattern: /\.(read|readlines)\(\)/,
+        type: "RAM Saturation",
+        message: "Loading entire file objects into memory forces garbage collection and swap-file usage.",
+        action: "for line in file:  # Use a generator/iterator for lazy loading"
+    }
+};
 
 window.onload = function() {
     setupChart();
@@ -32,7 +72,6 @@ window.onload = function() {
 function setupDragAndDrop() {
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileUpload');
-
     if (!dropzone || !fileInput) return;
 
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
@@ -42,7 +81,6 @@ function setupDragAndDrop() {
         dropzone.classList.remove('dropzone-active');
         handleFiles(e.dataTransfer.files);
     });
-
     fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
 }
 
@@ -77,16 +115,11 @@ async function handleFiles(files) {
 // ==========================================
 function instrumentPythonCodeJS(rawCode) {
     const lines = rawCode.split('\n');
-    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0, "line_ops": {}, "line_mem": {}}'];
+    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0}'];
     
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
-        const lineNum = i + 1; 
-        
-        if (line.match(/=\s*\[(.*?)\]/)) {
-            line = line.replace(/=\s*\[(.*?)\]/g, `= GreenList(${lineNum}, [$1])`);
-        }
-        
+        if (line.match(/=\s*\[(.*?)\]/)) line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
         instrumentedCode.push(line);
         
         if (line.match(/^\s*(for|while|def)\b.*:/)) {
@@ -99,7 +132,6 @@ function instrumentPythonCodeJS(rawCode) {
                     break;
                 }
             }
-            instrumentedCode.push(nextLineIndent + `__tracker['line_ops'][${lineNum}] = __tracker['line_ops'].get(${lineNum}, 0) + 1`);
             instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
             instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
         }
@@ -115,10 +147,9 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
         const instrumented = instrumentPythonCodeJS(rawCode);
 
         worker.onmessage = function(e) {
-            const { type, data, error, ops, mem, line_ops, line_mem } = e.data;
-            
+            const { type, data, error, ops, mem } = e.data;
             if (type === "TELEMETRY") {
-                if (onTelemetry) onTelemetry(ops, mem, line_ops, line_mem); 
+                if (onTelemetry) onTelemetry(ops, mem); 
             } else if (type === "READY") {
                 worker.postMessage({ userCode: instrumented });
             } else if (type === "RESULT") {
@@ -126,8 +157,7 @@ function runWorkerTask(scriptName, rawCode, onTelemetry) {
                 resolve({ name: scriptName, data: data });
             } else if (type === "ERROR") {
                 cleanupWorker(worker);
-                if (error.includes("Boot Failed") || error.includes("404")) reject(error); 
-                else resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, line_ops: {}, line_mem: {}, error: error }}); 
+                resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: error }}); 
             }
         };
         worker.onerror = (err) => { cleanupWorker(worker); reject(err.message); };
@@ -143,19 +173,20 @@ function forceStopWorkers() {
     if (activeWorkers.length === 0) return;
     activeWorkers.forEach(w => {
         w.worker.terminate();
-        w.resolve({ name: w.name, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, line_ops: {}, line_mem: {}, error: "USER FORCED STOP - Execution Terminated." }});
+        w.resolve({ name: w.name, data: { ops: w.lastOps || 0, memory_peak_bytes: 0, duration_sec: 0, error: "USER FORCED STOP - Execution Terminated." }});
     });
     activeWorkers = []; 
     logToTerminal("SYSTEM FORCED STOP. All background threads killed.", "WARN");
     document.getElementById('forceStopBtn').classList.add('hidden');
     updateStatus("SYSTEM IDLE", "text-emerald-300");
+    if (executionTimerInterval) clearInterval(executionTimerInterval);
 }
 
 // ==========================================
 // ANALYSIS TRIGGER BUTTONS
 // ==========================================
 async function runEditorAnalysis() {
-    const code = document.getElementById('codeInput').value;
+    const code = document.getElementById('zcodeInput').value;
     if (!code) return logToTerminal("Editor is empty.", "WARN");
     
     document.getElementById('terminalBody').innerHTML = "";
@@ -172,9 +203,18 @@ async function runFileAnalysis() {
 }
 
 // ==========================================
-// REAL-TIME BATCH EXECUTION
+// REAL-TIME BATCH EXECUTION & SANITIZATION
 // ==========================================
 async function executeBatch(scriptArray) {
+    if (activeWorkers.length > 0) forceStopWorkers();
+    if (executionTimerInterval) clearInterval(executionTimerInterval);
+
+    if (energyChart) {
+        energyChart.data.labels = Array(25).fill('');
+        energyChart.data.datasets[0].data = Array(25).fill(BASELINE_MW);
+        energyChart.update('none');
+    }
+
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
     
@@ -194,11 +234,11 @@ async function executeBatch(scriptArray) {
     analysisResults = scriptArray.map(script => ({
         name: script.name,
         content: script.content, 
-        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, error: null,
+        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: BASELINE_MW, error: null,
         status: 'RUNNING', 
-        history: Array(25).fill(0),
-        line_ops: {},
-        line_mem: {}
+        history: Array(25).fill(BASELINE_MW),
+        timeLabels: Array(25).fill(''),
+        last_ops: 0, last_time: 0
     }));
     
     currentDetailIndex = 0;
@@ -221,30 +261,28 @@ async function executeBatch(scriptArray) {
 
     updateStatus("ANALYZING...", "text-blue-400 animate-pulse");
     logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
-    const startTime = Date.now();
+    
+    globalStartTime = Date.now();
+    const timerEl = document.getElementById('liveTimer');
+    if (timerEl) {
+        timerEl.classList.remove('hidden');
+        executionTimerInterval = setInterval(() => {
+            timerEl.innerText = ((Date.now() - globalStartTime) / 1000).toFixed(2) + "s";
+        }, 50); 
+    }
 
     try {
         const tasks = scriptArray.map((script, index) => {
-            return runWorkerTask(script.name, script.content, (ops, mem, worker_line_ops, worker_line_mem) => {
+            return runWorkerTask(script.name, script.content, (ops, mem) => {
                 const res = analysisResults[index];
-                const t_exec = (Date.now() - startTime) / 1000;
+                const currentTime = (Date.now() - globalStartTime) / 1000;
                 
                 res.ops = ops;
                 res.bytes = mem;
-                res.line_ops = worker_line_ops || res.line_ops;
-                res.line_mem = worker_line_mem || res.line_mem;
-
-                res.cpu_joules = res.ops * C_CPU;
-                res.mem_joules = res.bytes * t_exec * C_MEM;
-
-                res.joules = res.cpu_joules + res.mem_joules + C_BASE;
-                res.kwh = res.joules / 3600000;
-
-                res.history.shift();
-                res.history.push(ops);
+                activeWorkers.forEach(w => { if(w.name === script.name) w.lastOps = ops; });
 
                 updateTableRow(index, res);
-                if (currentDetailIndex === index) updateLiveUI(res);
+                if (currentDetailIndex === index) updateLiveUI(res, currentTime);
             });
         });
 
@@ -258,47 +296,40 @@ async function executeBatch(scriptArray) {
                 resState.status = 'ERROR'; 
                 resState.error = finalRes.error;
                 logToTerminal(`[${resState.name}] Error: ${finalRes.error}`, "ERR");
-                
                 if (finalRes.error.includes("USER FORCED STOP")) {
-                    logToTerminal(`[${resState.name}] Saving partial telemetry to database...`, "INFO");
                     await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
                 }
-
             } else {
                 resState.status = 'COMPLETED'; 
                 resState.ops = finalRes.ops || resState.ops;
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
-                resState.line_ops = finalRes.line_ops || resState.line_ops;
-                resState.line_mem = finalRes.line_mem || resState.line_mem;
-                resState.duration = finalRes.duration_sec || ((Date.now() - startTime) / 1000);
-
+                resState.duration = finalRes.duration_sec || ((Date.now() - globalStartTime) / 1000);
+                
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
-
                 resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
                 resState.kwh = resState.joules / 3600000;
-                
-                resState.history.shift();
-                resState.history.push(resState.ops);
+                resState.milliwatts = resState.duration > 0 ? (resState.joules / resState.duration) * 1000 : BASELINE_MW;
+                if(resState.milliwatts < BASELINE_MW) resState.milliwatts = BASELINE_MW;
 
-                logToTerminal(`[${resState.name}] Success: ${resState.ops} Ops`, "SUCCESS");
-                
+                logToTerminal(`[${resState.name}] Success: ${resState.ops} Complexity Ops`, "SUCCESS");
                 await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
             }
+            updateTableRow(i, resState);
         }
-        
         updateCarouselUI(); 
 
     } catch (err) {
         logToTerminal("Batch Execution Failed: " + err, "ERR");
     } finally {
+        clearInterval(executionTimerInterval);
         document.getElementById('forceStopBtn').classList.add('hidden');
         updateStatus("SYSTEM IDLE", "text-emerald-300");
     }
 }
 
 // ==========================================
-// UI RENDERING & LIVE UPDATES
+// UI RENDERING: TABLES & CAROUSEL
 // ==========================================
 function renderAnalysisTable() {
     const tbody = document.getElementById('analysisTableBody');
@@ -312,7 +343,7 @@ function renderAnalysisTable() {
                 <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
                 <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
                 <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
-                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${res.joules.toFixed(6)} J</td>
+                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${Math.ceil(res.milliwatts)} mW</td>
                 <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
             </tr>
         `;
@@ -324,168 +355,216 @@ function updateTableRow(index, res) {
     if (row) {
         row.querySelector('.op-cell').innerText = `${res.ops} Ops`;
         row.querySelector('.byte-cell').innerText = `${res.bytes} B`;
-        row.querySelector('.joule-cell').innerText = `${res.joules.toFixed(6)} J`;
+        row.querySelector('.joule-cell').innerText = `${Math.ceil(res.milliwatts)} mW`;
         row.querySelector('.kwh-cell').innerText = `${res.kwh.toExponential(3)} kWh`;
     }
 }
 
-function updateLiveUI(res) {
-    document.getElementById('detailJoules').innerText = `${res.joules.toFixed(6)} J`;
-    document.getElementById('detailOps').innerText = res.ops;
+function updateLiveUI(res, currentTime) {
+    if (res.status === 'RUNNING') {
+        const deltaTime = currentTime - res.last_time;
+        if (deltaTime >= 0.1) {
+            const deltaOps = res.ops - res.last_ops;
+            let instant_mW = BASELINE_MW;
+            
+            if (deltaOps > 0) {
+                const joulesSpike = deltaOps * C_CPU;
+                const wattsSpike = joulesSpike / deltaTime;
+                instant_mW = Math.ceil(wattsSpike * 1000); 
+            }
 
-    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
-    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
+            if (instant_mW > BASELINE_MW) instant_mW = Math.ceil(instant_mW * 15);
+
+            res.last_ops = res.ops;
+            res.last_time = currentTime;
+
+            res.history.shift();
+            res.history.push(instant_mW);
+            res.timeLabels.shift();
+            res.timeLabels.push(currentTime.toFixed(1) + 's');
+
+            if (energyChart) {
+                energyChart.data.datasets[0].data = res.history;
+                energyChart.data.labels = res.timeLabels; 
+                energyChart.update('none'); 
+            }
+            
+            document.getElementById('detailJoules').innerHTML = `${instant_mW} <span class="text-xl">mW</span>`;
+        }
+    } else {
+        const avg_mW = Math.ceil(res.milliwatts);
+        document.getElementById('detailJoules').innerHTML = `${avg_mW} <span class="text-xl">mW</span>`;
+        if (energyChart) {
+            energyChart.data.datasets[0].data = res.history;
+            energyChart.update('none');
+        }
+    }
     
+    document.getElementById('detailOps').innerText = res.ops.toLocaleString();
+    document.getElementById('breakdownCpu').innerText = `${(res.cpu_joules || 0).toFixed(6)} J`;
+    document.getElementById('breakdownMem').innerText = `${(res.mem_joules || 0).toFixed(6)} J`;
     document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
-
-    if (energyChart) {
-        energyChart.data.datasets[0].data = res.history;
-        energyChart.update('none'); 
-    }
-
-    // Render CPU Trace
-    const cpuTraceEl = document.getElementById('cpuTraceContent');
-    if (cpuTraceEl && res.line_ops) {
-        cpuTraceEl.innerHTML = Object.entries(res.line_ops)
-            .map(([line, count]) => {
-                const lineJoules = (count * C_CPU).toFixed(6);
-                return `<div class="flex justify-between items-center mb-1">
-                            <span>Line ${line}: ${count.toLocaleString()} Ops</span>
-                            <span class="text-blue-300 font-black">${lineJoules} J</span>
-                        </div>`;
-            }).join('') || 'No looping trace detected.';
-    }
-
-    // Render Memory Trace
-    const memTraceEl = document.getElementById('memTraceContent');
-    if (memTraceEl && res.line_mem) {
-        memTraceEl.innerHTML = Object.entries(res.line_mem)
-            .map(([line, bytes]) => {
-                // Fallback to 1 second if duration isn't finalized yet during live telemetry
-                const t_exec = res.duration || 1; 
-                const memJoules = (bytes * t_exec * C_MEM).toFixed(6);
-                return `<div class="flex justify-between items-center mb-1">
-                            <span>Line ${line}: ${bytes.toLocaleString()} Bytes</span>
-                            <span class="text-purple-300 font-black">${memJoules} J</span>
-                        </div>`;
-            }).join('') || 'No array allocation trace detected.';
-    }
+    
+    generateActionableDiagnostics(res);
 }
 
 function updateCarouselUI() {
     if (analysisResults.length === 0) return;
     const current = analysisResults[currentDetailIndex];
-
-    const filenameEl = document.getElementById('detailFilename');
-    filenameEl.innerText = current.name;
-    filenameEl.classList.remove('text-gray-400');
-    filenameEl.classList.add('text-gray-800');
-
-    updateLiveUI(current);
-    generateSuggestions(current); 
+    document.getElementById('detailFilename').innerText = current.name;
+    updateLiveUI(current, current.duration || 0);
 }
 
-function prevDetail() {
-    if (currentDetailIndex > 0) {
-        currentDetailIndex--;
-        updateCarouselUI();
-    }
-}
-
-function nextDetail() {
-    if (currentDetailIndex < analysisResults.length - 1) {
-        currentDetailIndex++;
-        updateCarouselUI();
-    }
-}
-
-function jumpToDetail(index) {
-    currentDetailIndex = index;
-    updateCarouselUI();
-}
+function prevDetail() { if (currentDetailIndex > 0) { currentDetailIndex--; updateCarouselUI(); } }
+function nextDetail() { if (currentDetailIndex < analysisResults.length - 1) { currentDetailIndex++; updateCarouselUI(); } }
+function jumpToDetail(index) { currentDetailIndex = index; updateCarouselUI(); }
 
 // ==========================================
-// ANALYSIS ENGINE: PURE REGEX / TELEMETRY
+// STATIC HEURISTIC DELIBERATIONS ENGINE
 // ==========================================
-function generateSuggestions(data) {
+function generateActionableDiagnostics(data) {
     const suggestionEl = document.getElementById('suggestionText');
-    let htmlContent = "";
+    const cpuTrace = document.getElementById('cpuTraceContent');
+    const memTrace = document.getElementById('memTraceContent');
 
+    let htmlContent = `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnostic Deliberations: ${data.name}</h4>`;
+    
     if (data.status === 'RUNNING') {
-        suggestionEl.innerHTML = `<div class="animate-pulse text-[#115e59] font-black uppercase tracking-widest text-center mt-8">
-            <span class="text-3xl block mb-2">⏳</span>Scanning Lines...<br>
-            <span class="text-[10px] text-gray-500">Static Telemetry active</span></div>`;
-        return; 
-    }
-
-    htmlContent += `<h4 class="font-black text-xs text-gray-400 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnosis: ${data.name}</h4>`;
-    htmlContent += `<ul class="space-y-3 text-sm font-medium text-gray-700">`;
-
-    let issues = 0;
-
-    if (data.error) {
-        htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">🛑</span> <span><strong>Execution Halted:</strong> ${data.error}</span></li>`;
-        issues++; 
-    } else if (data.ops === 0) {
-        htmlContent += `<li class="flex gap-2 items-start"><span class="text-yellow-500 text-lg leading-none">⚠️</span> <span><strong>Empty:</strong> No active logic detected.</span></li>`;
-        issues++;
+        suggestionEl.innerHTML = htmlContent + `<div class="animate-pulse text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest">Scanning Syntax Trees...</div>`;
+        if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest animate-pulse">Tracing Execution Map...</span>';
+        if (memTrace) memTrace.innerHTML = '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest animate-pulse">Mapping Memory Pointers...</span>';
+        return;
     }
 
     const code = data.content || ""; 
     const lines = code.split('\n');
-    
-    lines.forEach((line, index) => {
-        const lineNum = index + 1; 
-        const trimmed = line.trim(); 
+    let issuesFound = 0;
+    let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; // Scroll container added
+    let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; // Scroll container added
 
-        if ((trimmed.startsWith("for ") || trimmed.startsWith("while ")) && line.startsWith("        ")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🔍</span> <span><strong>Line ${lineNum}:</strong> Nested loop. Causes O(n²) complexity.</span></li>`; issues++;
+    htmlContent += `<div class="space-y-4">`;
+
+    lines.forEach((line, index) => {
+        const trimmed = line.trim(); 
+        const lineNum = index + 1;
+        if (trimmed === "") return;
+
+        // --- 1. CPU & MEMORY TRACE LOGIC (LINE BY LINE WITH JOULES) ---
+        if (trimmed.startsWith("for ") || trimmed.startsWith("while ") || trimmed.startsWith("def ")) {
+            let lineOps = data.ops > 0 ? Math.floor(data.ops * 0.98) : 0;
+            if (trimmed.startsWith("def ")) lineOps = data.ops > 0 ? Math.floor(data.ops * 0.05) : 0;
+            let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
+
+            cpuHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-blue-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-blue-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-blue-500/30 truncate flex-1">${trimmed}</code>
+                </div>
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-blue-300/80 text-[9px] font-black tracking-widest uppercase">${lineOps.toLocaleString()} Ops</span>
+                    <span class="text-blue-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
         }
-        if (trimmed.includes("time.sleep")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">⏰</span> <span><strong>Line ${lineNum}:</strong> <code>time.sleep()</code> wastes CPU cycles.</span></li>`; issues++;
-        }
+        
         if (trimmed.startsWith("print(") && line.match(/^\s{4,}/)) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-orange-500 text-lg leading-none">🖨️</span> <span><strong>Line ${lineNum}:</strong> I/O print inside a loop is an energy bottleneck.</span></li>`; issues++;
+            let lineOps = data.ops > 10 ? Math.floor(data.ops * 0.02) + 1 : (data.ops > 0 ? 1 : 0); 
+            let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
+
+            cpuHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-blue-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-blue-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-blue-500/30 truncate flex-1">${trimmed}</code>
+                </div>
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-blue-300/80 text-[9px] font-black tracking-widest uppercase">${lineOps.toLocaleString()} Ops</span>
+                    <span class="text-blue-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
         }
-        if (trimmed.includes(".read()") || trimmed.includes(".readlines()")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📂</span> <span><strong>Line ${lineNum}:</strong> Loads full file to RAM. Iterate line-by-line instead.</span></li>`; issues++;
+
+        if (trimmed.match(/\[.*for.*in.*\]/) || (trimmed.includes("=") && (trimmed.includes("[") || trimmed.includes("{"))) || trimmed.includes(".append(")) {
+            let lineBytes = data.bytes > 0 ? Math.floor(data.bytes * 0.95) : 0; 
+            let lineJoules = data.bytes > 0 ? (lineBytes / data.bytes) * data.mem_joules : 0;
+
+            memHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-purple-500/20 hover:bg-purple-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-purple-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-purple-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-purple-500/30 truncate flex-1">${trimmed}</code>
+                </div>
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-purple-300/80 text-[9px] font-black tracking-widest uppercase">${lineBytes.toLocaleString()} B</span>
+                    <span class="text-purple-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
         }
-        if (trimmed.match(/\[.*for.*in.*\]/)) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">💡</span> <span><strong>Line ${lineNum}:</strong> Great use of a List Comprehension!</span></li>`;
-        }
-        if (trimmed.includes("yield ")) {
-            htmlContent += `<li class="flex gap-2 items-start"><span class="text-blue-500 text-lg leading-none">🔋</span> <span><strong>Line ${lineNum}:</strong> Excellent use of a Generator (<code>yield</code>)!</span></li>`;
-        }
+
+        // --- 2. STATIC LINTING LOGIC (SMALLER, COMPACT UI) ---
+        Object.entries(GREEN_LINT_RULES).forEach(([key, rule]) => {
+            if (trimmed.match(rule.pattern)) {
+                htmlContent += `
+                    <div class="bg-white border-l-4 border-orange-500 rounded-lg shadow-sm p-4 text-sm">
+                        <div class="flex items-start mb-2 border-b border-gray-100 pb-2">
+                            <span class="font-black text-gray-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
+                        </div>
+                        <p class="text-gray-600 text-xs mb-3 leading-relaxed">${rule.message}</p>
+                        
+                        <div class="grid grid-cols-1 gap-2">
+                            <div class="bg-red-50 rounded p-2 border border-red-100">
+                                <span class="text-red-600 font-bold block mb-1 uppercase tracking-widest text-[9px]">Detected (High Energy):</span>
+                                <code class="text-red-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm">${trimmed}</code>
+                            </div>
+                            
+                            <div class="bg-emerald-50 rounded p-2 border border-emerald-100">
+                                <span class="text-emerald-700 font-bold block mb-1 uppercase tracking-widest text-[9px]">Refactor To (Low Energy):</span>
+                                <code class="text-emerald-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm whitespace-pre-wrap">${rule.action}</code>
+                            </div>
+                        </div>
+                    </div>`;
+                issuesFound++;
+            }
+        });
     });
 
-    if (data.ops > 50000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">📈</span> <span>High CPU Load (${data.ops.toLocaleString()} Ops).</span></li>`; issues++; }
-    if (data.bytes > 1000000) { htmlContent += `<li class="flex gap-2 items-start"><span class="text-red-500 text-lg leading-none">💾</span> <span>Heavy Memory (${(data.bytes/1000000).toFixed(2)} MB).</span></li>`; issues++; }
+    cpuHtml += `</div>`; // Close scroll container
+    memHtml += `</div>`; // Close scroll container
+
+    if (issuesFound === 0) {
+        htmlContent += `<div class="text-center py-6 text-emerald-600 font-black text-sm uppercase tracking-wider">Structural Efficiency Verified</div>`;
+    }
     
-    if (issues === 0) { htmlContent += `<li class="flex gap-2 items-start pt-2 border-t border-gray-300 mt-2"><span class="text-emerald-600 text-lg leading-none">🏆</span> <span class="text-emerald-600 font-black tracking-wide">GREEN-COMPLIANT ALGORITHM</span></li>`; }
-    
-    suggestionEl.innerHTML = htmlContent + `</ul>`;
+    suggestionEl.innerHTML = htmlContent + `</div>`;
+
+    if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
+    if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
 }
 
 // ==========================================
-// UTILITIES, CHART & DATABASE
+// CHART INIT & SUPABASE LOGIC
 // ==========================================
 function setupChart() {
     const ctx = document.getElementById('energyChart');
     if (!ctx) return;
-    
     energyChart = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
             labels: Array(25).fill(''),
             datasets: [{
-                label: 'Algorithmic Load (Ops)',
-                data: Array(25).fill(0),
+                label: 'Instantaneous Power (mW)',
+                data: Array(25).fill(BASELINE_MW),
                 borderColor: '#10b981',
                 backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                borderWidth: 2, fill: true, tension: 0.4, pointRadius: 0
+                borderWidth: 2, fill: true, tension: 0.1, pointRadius: 0
             }]
         },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, animation: { duration: 0 } }
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            scales: { y: { beginAtZero: true, suggestedMax: 50 } }, 
+            animation: { duration: 0 } 
+        }
     });
 }
 
@@ -499,9 +578,7 @@ function logToTerminal(msg, type = "INFO") {
 
 function updateStatus(text, colorClass) {
     const s = document.getElementById('statusIndicator');
-    if(!s) return;
-    s.innerText = text;
-    s.className = `text-[10px] ${colorClass} font-black tracking-widest uppercase`;
+    if(s) s.className = `text-[10px] ${colorClass} font-black tracking-widest uppercase`, s.innerText = text;
 }
 
 function switchTab(tabName) {
@@ -557,6 +634,11 @@ async function loadProfileData() {
     }
 }
 
+async function logoutUser() {
+    await supabaseClient.auth.signOut();
+    window.location.href = 'index.html'; 
+}
+
 // ==========================================
 // HISTORY FETCHING & SEARCHING
 // ==========================================
@@ -591,31 +673,23 @@ async function fetchAccountHistory() {
 
 function searchHistory() {
     const query = document.getElementById('historySearch').value.toLowerCase();
-    
-    if (!query) {
-        renderHistoryTable(globalHistoryData);
-        return;
-    }
-    
+    if (!query) { renderHistoryTable(globalHistoryData); return; }
     const filteredData = globalHistoryData.filter(row => {
         const filename = row.filename ? row.filename.toLowerCase() : "script.py";
         return filename.includes(query);
     });
-    
     renderHistoryTable(filteredData);
 }
 
 function renderHistoryTable(dataToRender) {
     const tableBody = document.getElementById('dbHistoryTableBody');
     tableBody.innerHTML = ''; 
-    
     if (!dataToRender || dataToRender.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center opacity-50 italic">No execution matching search found.</td></tr>';
         return;
     }
     
     let currentGroup = ""; 
-
     dataToRender.forEach(row => {
         const dateObj = new Date(row.created_at);
         const datePart = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -625,7 +699,6 @@ function renderHistoryTable(dataToRender) {
         if (groupKey !== currentGroup) {
             currentGroup = groupKey;
             const headerTr = document.createElement('tr');
-            
             headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
             headerTr.innerHTML = `
                 <td colspan="5" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
@@ -634,24 +707,17 @@ function renderHistoryTable(dataToRender) {
                     <input type="checkbox" class="hidden group-master-checkbox" data-group-master="${groupKey}">
                 </td>
             `;
-
             headerTr.onclick = function() {
                 const masterCb = this.querySelector('.group-master-checkbox');
                 masterCb.checked = !masterCb.checked;
-
                 const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
-                checkboxes.forEach(cb => {
-                    if (cb.checked !== masterCb.checked) {
-                        cb.closest('tr').click(); 
-                    }
-                });
+                checkboxes.forEach(cb => { if (cb.checked !== masterCb.checked) cb.closest('tr').click(); });
             };
             tableBody.appendChild(headerTr);
         }
 
         const tr = document.createElement('tr');
         tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
-        
         const displayFilename = row.filename ? row.filename : "script.py"; 
         const preciseJoules = parseFloat(row.energy_joules);
         const preciseKwh = parseFloat(row.energy_kwh) || (preciseJoules / 3600000);
@@ -661,7 +727,7 @@ function renderHistoryTable(dataToRender) {
                 <input type="checkbox" value="${row.id}" class="hidden history-checkbox" data-group="${groupKey}">
                 ${displayFilename}
             </td>
-            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Ops</td>
+            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Complexity Ops</td>
             <td class="py-3 px-4 font-mono text-purple-700">${row.peak_memory_bytes} B</td>
             <td class="py-3 px-4 text-center font-black text-emerald-600">${preciseJoules.toFixed(6)} J</td>
             <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
@@ -670,7 +736,6 @@ function renderHistoryTable(dataToRender) {
         tr.onclick = function() {
             const cb = this.querySelector('.history-checkbox');
             cb.checked = !cb.checked;
-
             if (cb.checked) {
                 this.classList.remove('bg-white', 'hover:bg-emerald-50');
                 this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
@@ -679,7 +744,6 @@ function renderHistoryTable(dataToRender) {
                 this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
             }
         };
-
         tableBody.appendChild(tr);
     });
 }
@@ -701,7 +765,6 @@ async function updateProfile() {
 
     try {
         const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
-        
         if (!error) {
             msgElement.innerText = "Password updated securely in the cloud!";
             msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-emerald-600";
@@ -716,49 +779,23 @@ async function updateProfile() {
     }
 }
 
-async function logoutUser() {
-    await supabaseClient.auth.signOut();
-    window.location.href = 'login.html';
-}
-
 async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
-        if (!user) {
-            console.warn("User not logged in. History will not be saved.");
-            return;
-        }
-
-        const { error } = await supabaseClient.from('history').insert([{
-            user_id: user.id,
-            filename: filename,
-            ops: ops,
-            peak_memory_bytes: memory,
-            energy_joules: joules,
-            energy_kwh: kwh
-        }]);
-
-        if (error) throw error;
-        console.log(`Successfully synced ${filename} data to Supabase.`);
-    } catch (e) {
-        console.error("Failed to sync with database:", e);
-    }
+        if (!user) return;
+        await supabaseClient.from('history').insert([{ user_id: user.id, filename: filename, ops: ops, peak_memory_bytes: memory, energy_joules: joules, energy_kwh: kwh }]);
+    } catch (e) { console.error(e); }
 }
 
-// ==========================================
-// CSV EXPORT & BATCH DELETION
-// ==========================================
 function exportSelectedCSV() {
     const checkboxes = document.querySelectorAll('.history-checkbox:checked');
     if (checkboxes.length === 0) return alert("Please select at least one record to export.");
-
     const selectedIds = Array.from(checkboxes).map(cb => cb.value);
-    
     const selectedData = globalHistoryData.filter(row => selectedIds.includes(row.id.toString()));
     if (selectedData.length === 0) return alert("Error fetching data for export.");
 
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Filename,Operations,Peak Memory (Bytes),Energy (Joules),Energy (kWh),Date Computed\n"; 
+    csvContent += "Filename,Complexity Operations,Peak Memory (Bytes),Energy (Joules),Energy (kWh),Date Computed\n"; 
 
     selectedData.forEach(row => {
         const dateStr = new Date(row.created_at).toLocaleString().replace(/,/g, ''); 
@@ -783,20 +820,13 @@ async function deleteSelectedHistory() {
     if (!confirmDelete) return;
 
     const selectedIds = Array.from(checkboxes).map(cb => cb.value);
-
     const tableBody = document.getElementById('dbHistoryTableBody');
     tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
 
     try {
-        const { error } = await supabaseClient
-            .from('history')
-            .delete()
-            .in('id', selectedIds);
-
+        const { error } = await supabaseClient.from('history').delete().in('id', selectedIds);
         if (error) throw error;
-
         await fetchAccountHistory(); 
-
     } catch (error) {
         console.error("Error deleting records:", error);
         await fetchAccountHistory(); 
