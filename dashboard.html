@@ -45,11 +45,6 @@
         #terminalContainer {
             box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
         }
-        
-        .shadow-glow:hover {
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
-            transform: translateY(-1px);
-        }
     </style>
 </head>
 <body class="font-sans min-h-screen text-gray-800">
@@ -67,6 +62,7 @@
                 
                 <div id="engineStatus" class="flex items-center gap-2 px-3 py-1 bg-emerald-900 rounded-full">
                     <span id="statusIndicator" class="text-[10px] text-emerald-300 font-black tracking-widest uppercase">SYSTEM IDLE</span>
+                    <span id="liveTimer" class="text-[11px] text-emerald-400 font-mono bg-emerald-950 px-2 py-0.5 rounded shadow-inner hidden">0.00s</span>
                 </div>
                 <button onclick="logoutUser()" class="text-[10px] bg-red-600 hover:bg-red-700 px-3 py-1 rounded-full font-bold uppercase transition-all">Logout</button>
             </div>
@@ -77,7 +73,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section class="glass-card p-6 rounded-2xl flex flex-col">
                 <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4">Live Execution Input</h2>
-                <textarea id="codeInput" class="w-full p-4 bg-[#111827] text-emerald-400 font-mono text-xs rounded-t-xl border-b border-emerald-500 focus:outline-none" style="height: 180px;" placeholder="print('Hello World')"></textarea>            
+                <textarea id="zcodeInput" class="w-full p-4 bg-[#111827] text-emerald-400 font-mono text-xs rounded-t-xl border-b border-emerald-500 focus:outline-none" style="height: 180px;" placeholder="print('Hello World')"></textarea>            
                 <div id="terminalContainer" class="w-full bg-black rounded-b-xl p-4 font-mono text-xs mb-4 overflow-y-auto" style="height: 100px;">
                     <div id="terminalBody" class="text-emerald-100/80 leading-relaxed whitespace-pre-wrap"><span class="text-emerald-500">guest:~$</span> Ready for input.</div>
                 </div>
@@ -117,10 +113,8 @@
                     <span class="text-[8px] font-bold mt-1 uppercase text-center">Prev</span>
                 </button>
 
-                <!-- THE CENTER COLUMN -->
                 <div class="flex-1 flex flex-col gap-4">
                     
-                    <!-- 1. Real-Time Physics Model (Chart) -->
                     <div class="glass-card p-6 rounded-2xl flex flex-col items-center">
                         <h3 class="text-sm font-black text-[#115e59] uppercase tracking-widest mb-2">Real-Time Physics Model</h3>
                         <div class="w-full h-48 bg-white border border-gray-200 rounded p-2 mb-4">
@@ -129,73 +123,72 @@
                         <h4 id="detailFilename" class="font-black text-lg tracking-wider uppercase text-center break-all text-gray-400">AWAITING SCRIPT</h4>
                     </div>
 
-                    <!-- 2. Total Energy & Complexity Ops -->
-                    <div class="grid grid-cols-2 gap-4">
+                   <div class="grid grid-cols-2 gap-4">
                         <div class="glass-card p-4 rounded-xl text-center border-b-4 border-emerald-500">
-                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Energy</p>
-                            <p id="detailJoules" class="text-2xl lg:text-3xl font-black text-[#115e59]">0.00 J</p>
+                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Compute Power</p>
+                            <p id="detailJoules" class="text-2xl lg:text-3xl font-black text-[#115e59]">0 <span class="text-xl">mW</span></p>
                         </div>
                         <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
                             <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
                             <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800">0</p>
                         </div>
-                    </div>
+                    </div>  
 
-                    <!-- THERMODYNAMIC MATH PROOF PANEL  -->
                     <div class="glass-card p-6 rounded-xl bg-gray-50 border border-gray-200 shadow-sm">
                         
-                        <!-- Header with Academic Badge -->
                         <div class="flex items-center justify-between border-b border-gray-200 pb-2 mb-4">
                             <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Thermodynamic Math Proof</p>
                             <span class="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest px-2 py-0.5 rounded shadow-sm border border-emerald-200">HEURISTIC ESTIMATION</span>
                         </div>
 
-                        <!-- THE FORMULA GUIDE -->
                         <div class="bg-[#111827] text-emerald-400 p-3 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
                             <p class="text-emerald-200 mb-2 font-bold text-xs">/// HEURISTIC EQUATION GUIDE</p>
-                            <p><span class="text-blue-400 font-bold">CPU Work</span> = N_Ops × 1.5e-9 Joules</p>
-                            <p><span class="text-purple-400 font-bold">Memory Work</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9 Joules</p>
+                            <p><span class="text-blue-400 font-bold">CPU Work (Joules)</span> = N_Ops × 1.5e-9</p>
+                            <p><span class="text-purple-400 font-bold">Memory Work (Joules)</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9</p>
                             <div class="border-t border-gray-700 mt-2 pt-2 text-gray-300">
-                                <p>Total Energy = CPU Work + Memory Work + 0.0005 (Base)</p>
+                                <p>Total Energy (J) = CPU Work + Memory Work + 0.0005 (Base)</p>
+                                <p>Average Power (mW) = (Total Energy / T_Exec_Sec) * 1000</p>
                             </div>
                         </div>
                         
-                        <!-- ============================================== -->
-                        <!-- LIVE EXECUTION DATA (NOW FULLY CLICKABLE)      -->
-                        <!-- ============================================== -->
                         <div class="flex flex-col gap-3 text-sm font-mono text-gray-700">
                             
-                            <!-- CPU ROW -->
-                            <div onclick="document.getElementById('cpuTrace').classList.toggle('hidden')" class="flex justify-between items-center px-4 py-3 rounded bg-white shadow-sm border-l-4 border-blue-500 cursor-pointer hover:bg-blue-50 transition-colors relative z-10">
-                                <span class="font-bold text-gray-600">Live CPU Work: <span class="text-[9px] text-blue-500 ml-2 bg-blue-100 px-2 py-0.5 rounded-full uppercase tracking-widest shadow-sm">(Click for Trace)</span></span>
-                                <span id="breakdownCpu" class="text-blue-600 font-black">0.000000 J</span>
+                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-blue-500 overflow-hidden">
+                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors" onclick="document.getElementById('cpuTracePanel').classList.toggle('hidden')">
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-bold text-gray-600">Live CPU Work:</span>
+                                        <span class="bg-blue-100 text-blue-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-blue-200 transition">(Click for trace)</span>
+                                    </div>
+                                    <span id="breakdownCpu" class="text-blue-600 font-black">0.000000 J</span>
+                                </div>
+                                <div id="cpuTracePanel" class="hidden bg-[#273f87] text-white p-4 border-t border-gray-200 shadow-inner">
+                                    <p class="text-[10px] text-blue-200 font-black tracking-widest uppercase mb-2">CPU Line Trace:</p>
+                                    <div class="border-t border-blue-400/30 w-full mb-2"></div>
+                                    <p class="text-xs text-blue-100/70" id="cpuTraceContent">Awaiting execution data...</p>
+                                </div>
                             </div>
-                            
-                            <!-- HIDDEN CPU TRACE DROPDOWN -->
-                            <div id="cpuTrace" class="hidden bg-[#1e3a8a] text-blue-100 p-4 rounded-b-xl rounded-t-sm mt-[-16px] pt-6 mb-1 shadow-inner text-xs">
-                                <p class="text-blue-300 font-bold mb-2 border-b border-blue-700 pb-2">CPU LINE TRACE:</p>
-                                <div id="cpuLineDetails" class="space-y-1"></div>
+
+                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-purple-500 overflow-hidden">
+                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-purple-50 transition-colors" onclick="document.getElementById('memTracePanel').classList.toggle('hidden')">
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-bold text-gray-600">Live Memory Work:</span>
+                                        <span class="bg-purple-100 text-purple-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-purple-200 transition">(Click for trace)</span>
+                                    </div>
+                                    <span id="breakdownMem" class="text-purple-600 font-black">0.000000 J</span>
+                                </div>
+                                <div id="memTracePanel" class="hidden bg-[#58219c] text-white p-4 border-t border-gray-200 shadow-inner">
+                                    <p class="text-[10px] text-purple-200 font-black tracking-widest uppercase mb-2">Memory Line Trace:</p>
+                                    <div class="border-t border-purple-400/30 w-full mb-2"></div>
+                                    <p class="text-xs text-purple-100/70" id="memTraceContent">Awaiting execution data...</p>
+                                </div>
                             </div>
-                            
-                            <!-- MEMORY ROW -->
-                            <div onclick="document.getElementById('memTrace').classList.toggle('hidden')" class="flex justify-between items-center px-4 py-3 rounded bg-white shadow-sm border-l-4 border-purple-500 cursor-pointer hover:bg-purple-50 transition-colors relative z-10">
-                                <span class="font-bold text-gray-600">Live Memory Work: <span class="text-[9px] text-purple-500 ml-2 bg-purple-100 px-2 py-0.5 rounded-full uppercase tracking-widest shadow-sm">(Click for Trace)</span></span>
-                                <span id="breakdownMem" class="text-purple-600 font-black">0.000000 J</span>
-                            </div>
-                            
-                            <!-- HIDDEN MEMORY TRACE DROPDOWN -->
-                            <div id="memTrace" class="hidden bg-[#4c1d95] text-purple-100 p-4 rounded-b-xl rounded-t-sm mt-[-16px] pt-6 mb-1 shadow-inner text-xs">
-                                <p class="text-purple-300 font-bold mb-2 border-b border-purple-700 pb-2">MEMORY LINE TRACE:</p>
-                                <div id="memLineDetails" class="space-y-1"></div>
-                            </div>
-                            
+
                             <div class="flex justify-between items-center px-4 py-3 rounded bg-white shadow-sm border-l-4 border-gray-400">
                                 <span class="font-bold text-gray-600">System Base:</span>
                                 <span id="breakdownBase" class="text-gray-500 font-black">0.000500 J</span>
                             </div>
+                            
                         </div>
-                        <!-- ============================================== -->
-
                     </div>
 
                 </div>
@@ -207,8 +200,8 @@
             </section>
 
             <section class="glass-card p-6 rounded-2xl flex flex-col h-fit">
-                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions</h2>
-                <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[350px]">
+                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions & Deliberations</h2>
+                <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[550px]">
                     <p id="suggestionText" class="text-sm font-bold text-gray-600 whitespace-pre-wrap">System ready. Input your code or upload files to begin analysis.</p>
                 </div>
             </section>
@@ -230,6 +223,9 @@
                 <button onclick="exportSelectedCSV()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
                     Export
                 </button>
+                <button onclick="deleteSelectedHistory()" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
+                    Delete
+                </button>
             </div>
         </div>
 
@@ -238,9 +234,9 @@
                     <thead class="bg-gray-200 text-gray-700 text-xs uppercase tracking-wider">
                         <tr>
                             <th class="py-3 px-4">File Name</th>
-                            <th class="py-3 px-4">Complexity (Ops)</th>
+                            <th class="py-3 px-4">Complexity Ops</th>
                             <th class="py-3 px-4">Peak Memory</th>
-                            <th class="py-3 px-4 text-center">Total Joules</th>
+                            <th class="py-3 px-4 text-center">Avg Power (mW)</th>
                             <th class="py-3 px-4 text-center">Total kWh</th>
                         </tr>
                     </thead>
