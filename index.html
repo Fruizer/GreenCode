@@ -69,45 +69,23 @@
     }
 
     async function signUp() {
-    const username = usernameInput.value; // Used as a display name
-    const email = identifierInput.value; // Now strictly used as email
-    const password = passwordInput.value;
-
-    showMessage("Creating account...", false);
-
-    // 1. Create the Auth User
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-    });
-
-    if (error) return showMessage(error.message, true);
-
-    // 2. Save the Display Name to Profiles
-    const { error: profileError } = await supabaseClient
-        .from('profiles')
-        .insert([{ id: data.user.id, username: username, email: email }]);
-
+    // ... existing code ...
     if (profileError) console.error("Profile error:", profileError);
     
-    // Redirect instantly since Confirm Email is OFF
-    window.location.href = 'index.html';
+    // Redirect instantly to the dashboard
+    window.location.href = 'dashboard.html'; 
 }
 
 async function logIn() {
-    const email = identifierInput.value;
-    const password = passwordInput.value;
-
-    showMessage("Authenticating...", false);
-
-    // Simple Email Login
+    // ... existing code ...
     const { error } = await supabaseClient.auth.signInWithPassword({
         email: email,
         password: password,
     });
 
     if (error) showMessage(error.message, true);
-    else window.location.href = 'index.html';
+    // Redirect to the dashboard on success
+    else window.location.href = 'dashboard.html'; 
 }
 
     async function resetPassword() {
