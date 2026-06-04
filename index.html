@@ -45,6 +45,11 @@
         #terminalContainer {
             box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
         }
+        
+        .shadow-glow:hover {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body class="font-sans min-h-screen text-gray-800">
@@ -126,7 +131,7 @@
                    <div class="grid grid-cols-2 gap-4">
                         <div class="glass-card p-4 rounded-xl text-center border-b-4 border-emerald-500">
                             <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Compute Power</p>
-                            <p id="detailJoules" class="text-2xl lg:text-3xl font-black text-[#115e59]">0 <span class="text-xl">mW</span></p>
+                            <p id="detailJoules" class="text-2xl lg:text-3xl font-black text-[#115e59]">0 mW</p>
                         </div>
                         <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
                             <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
@@ -143,11 +148,10 @@
 
                         <div class="bg-[#111827] text-emerald-400 p-3 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
                             <p class="text-emerald-200 mb-2 font-bold text-xs">/// HEURISTIC EQUATION GUIDE</p>
-                            <p><span class="text-blue-400 font-bold">CPU Work (Joules)</span> = N_Ops × 1.5e-9</p>
-                            <p><span class="text-purple-400 font-bold">Memory Work (Joules)</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9</p>
+                            <p><span class="text-blue-400 font-bold">CPU Work</span> = N_Ops × 1.5e-9 Joules</p>
+                            <p><span class="text-purple-400 font-bold">Memory Work</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9 Joules</p>
                             <div class="border-t border-gray-700 mt-2 pt-2 text-gray-300">
-                                <p>Total Energy (J) = CPU Work + Memory Work + 0.0005 (Base)</p>
-                                <p>Average Power (mW) = (Total Energy / T_Exec_Sec) * 1000</p>
+                                <p>Total Energy = CPU Work + Memory Work + 0.0005 (Base)</p>
                             </div>
                         </div>
                         
@@ -200,8 +204,8 @@
             </section>
 
             <section class="glass-card p-6 rounded-2xl flex flex-col h-fit">
-                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions & Deliberations</h2>
-                <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[550px]">
+                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions</h2>
+                <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[350px]">
                     <p id="suggestionText" class="text-sm font-bold text-gray-600 whitespace-pre-wrap">System ready. Input your code or upload files to begin analysis.</p>
                 </div>
             </section>
