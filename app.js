@@ -17,47 +17,38 @@ let energyChart;
 let activeWorkers = []; 
 let globalHistoryData = []; 
 
-let executionTimerInterval; 
-let globalStartTime = 0;
-
 const C_CPU = 1.5e-9;
 const C_MEM = 2.25e-9;
 const BASELINE_MW = 2; // System idle power in milliwatts
 const C_BASE = 0.0005;
 
 // ==========================================
-// PATTERN-BASED STATIC ANALYSIS DICTIONARY
+// GREEN LINTING PROFESSIONAL RULE DICTIONARY
 // ==========================================
 const GREEN_LINT_RULES = {
-    "infinite_loop": {
-        pattern: /^\s*(while\s+True|while\s+1):/,
-        type: "Infinite Loop Risk",
-        message: "Unbounded loops permanently lock CPU threads, draining constant baseline power.",
-        action: "while condition_met:  # Add a deterministic break condition"
-    },
     "nested_loop": {
-        pattern: /^\s{4,}(for|while)\b/, 
-        type: "O(n²) Complexity Spike",
-        message: "Nested iteration causes exponential operation growth. A 100-item list requires 10,000 ops.",
-        action: "hash_map = {item.id: item}  # Flatten to O(n) using a dictionary lookup"
+        pattern: /^\s{8,}(for|while)\b/,
+        icon: "🔍",
+        type: "O(n²) Complexity Risk",
+        remedy: "Consider refactoring nested structures into hash maps (dictionaries) or flat tracking arrays to achieve O(n) linear execution time."
     },
     "sleep_block": {
         pattern: /time\.sleep\(/,
-        type: "Synchronous Thread Block",
-        message: "Hardware clocks remain active and consume power while waiting for synchronous sleep timers.",
-        action: "await asyncio.sleep(n)  # Yield thread control back to the OS"
+        icon: "⏰",
+        type: "CPU Waste Bottleneck",
+        remedy: "Consider replacing synchronous sleep calls with event-driven hooks or asynchronous triggers to avoid locking core clock cycles."
     },
     "io_print": {
         pattern: /^\s+(print|sys\.stdout\.write)\(/,
-        type: "I/O Hardware Wake",
-        message: "Calling standard output inside a loop triggers hardware interrupts repeatedly.",
-        action: "buffer.append(data)\nprint(''.join(buffer))  # Batch output outside the loop"
+        icon: "🖨️",
+        type: "I/O Overhead Leak",
+        remedy: "Consider removing debug print statements or batching log strings into an in-memory buffer before flushing to terminal output."
     },
     "memory_load": {
         pattern: /\.(read|readlines)\(\)/,
-        type: "RAM Saturation",
-        message: "Loading entire file objects into memory forces garbage collection and swap-file usage.",
-        action: "for line in file:  # Use a generator/iterator for lazy loading"
+        icon: "📂",
+        type: "RAM Saturation Risk",
+        remedy: "Consider processing file data line-by-line using an iterator (e.g., 'for line in file:') instead of loading full objects into memory."
     }
 };
 
@@ -206,15 +197,6 @@ async function runFileAnalysis() {
 // REAL-TIME BATCH EXECUTION & SANITIZATION
 // ==========================================
 async function executeBatch(scriptArray) {
-    if (activeWorkers.length > 0) forceStopWorkers();
-    if (executionTimerInterval) clearInterval(executionTimerInterval);
-
-    if (energyChart) {
-        energyChart.data.labels = Array(25).fill('');
-        energyChart.data.datasets[0].data = Array(25).fill(BASELINE_MW);
-        energyChart.update('none');
-    }
-
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
     
@@ -234,11 +216,9 @@ async function executeBatch(scriptArray) {
     analysisResults = scriptArray.map(script => ({
         name: script.name,
         content: script.content, 
-        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: BASELINE_MW, error: null,
+        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: 0, error: null,
         status: 'RUNNING', 
-        history: Array(25).fill(BASELINE_MW),
-        timeLabels: Array(25).fill(''),
-        last_ops: 0, last_time: 0
+        history: Array(25).fill(0) 
     }));
     
     currentDetailIndex = 0;
@@ -261,25 +241,30 @@ async function executeBatch(scriptArray) {
 
     updateStatus("ANALYZING...", "text-blue-400 animate-pulse");
     logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
-    
-    globalStartTime = Date.now();
-    const timerEl = document.getElementById('liveTimer');
-    if (timerEl) {
-        timerEl.classList.remove('hidden');
-        executionTimerInterval = setInterval(() => {
-            timerEl.innerText = ((Date.now() - globalStartTime) / 1000).toFixed(2) + "s";
-        }, 50); 
-    }
+    const startTime = Date.now();
 
     try {
         const tasks = scriptArray.map((script, index) => {
             return runWorkerTask(script.name, script.content, (ops, mem) => {
                 const res = analysisResults[index];
-                const currentTime = (Date.now() - globalStartTime) / 1000;
+                const t_exec = (Date.now() - startTime) / 1000;
+                const elapsedSeconds = t_exec || 1;
                 
                 res.ops = ops;
                 res.bytes = mem;
-                activeWorkers.forEach(w => { if(w.name === script.name) w.lastOps = ops; });
+
+                res.cpu_joules = res.ops * C_CPU;
+                res.mem_joules = res.bytes * t_exec * C_MEM;
+
+                res.joules = res.cpu_joules + res.mem_joules + C_BASE;
+                res.kwh = res.joules / 3600000;
+                
+                // [INSTANT POWER TRACKING]: Calculate Milliwatts per time frame
+                res.milliwatts = (res.joules / elapsedSeconds) * 1000;
+
+                res.history.shift();
+                // Map power metrics dynamically to drive graphs up and down
+                res.history.push(res.milliwatts);
 
                 updateTableRow(index, res);
                 if (currentDetailIndex === index) updateLiveUI(res, currentTime);
@@ -296,6 +281,7 @@ async function executeBatch(scriptArray) {
                 resState.status = 'ERROR'; 
                 resState.error = finalRes.error;
                 logToTerminal(`[${resState.name}] Error: ${finalRes.error}`, "ERR");
+                
                 if (finalRes.error.includes("USER FORCED STOP")) {
                     await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
                 }
@@ -303,20 +289,26 @@ async function executeBatch(scriptArray) {
                 resState.status = 'COMPLETED'; 
                 resState.ops = finalRes.ops || resState.ops;
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
-                resState.duration = finalRes.duration_sec || ((Date.now() - globalStartTime) / 1000);
-                
+                resState.duration = finalRes.duration_sec || ((Date.now() - startTime) / 1000);
+                const finalSeconds = resState.duration || 1;
+
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
+
                 resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
                 resState.kwh = resState.joules / 3600000;
-                resState.milliwatts = resState.duration > 0 ? (resState.joules / resState.duration) * 1000 : BASELINE_MW;
-                if(resState.milliwatts < BASELINE_MW) resState.milliwatts = BASELINE_MW;
+                resState.milliwatts = (resState.joules / finalSeconds) * 1000;
+                
+                resState.history.shift();
+                resState.history.push(resState.milliwatts);
 
-                logToTerminal(`[${resState.name}] Success: ${resState.ops} Complexity Ops`, "SUCCESS");
+                logToTerminal(`[${resState.name}] Success: ${resState.ops} Ops`, "SUCCESS");
                 await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
             }
             updateTableRow(i, resState);
         }
+        
+        // [UX SHIFT]: Render diagnostics and rule recommendations ONLY upon absolute completion
         updateCarouselUI(); 
 
     } catch (err) {
@@ -343,7 +335,7 @@ function renderAnalysisTable() {
                 <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
                 <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
                 <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
-                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${Math.ceil(res.milliwatts)} mW</td>
+                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${res.milliwatts.toFixed(0)} mW</td>
                 <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
             </tr>
         `;
@@ -355,57 +347,31 @@ function updateTableRow(index, res) {
     if (row) {
         row.querySelector('.op-cell').innerText = `${res.ops} Ops`;
         row.querySelector('.byte-cell').innerText = `${res.bytes} B`;
-        row.querySelector('.joule-cell').innerText = `${Math.ceil(res.milliwatts)} mW`;
+        row.querySelector('.joule-cell').innerText = `${res.milliwatts.toFixed(0)} mW`;
         row.querySelector('.kwh-cell').innerText = `${res.kwh.toExponential(3)} kWh`;
     }
 }
 
-function updateLiveUI(res, currentTime) {
-    if (res.status === 'RUNNING') {
-        const deltaTime = currentTime - res.last_time;
-        if (deltaTime >= 0.1) {
-            const deltaOps = res.ops - res.last_ops;
-            let instant_mW = BASELINE_MW;
-            
-            if (deltaOps > 0) {
-                const joulesSpike = deltaOps * C_CPU;
-                const wattsSpike = joulesSpike / deltaTime;
-                instant_mW = Math.ceil(wattsSpike * 1000); 
-            }
+function updateLiveUI(res) {
+    // Show whole numbers for power as requested by panels
+    document.getElementById('detailJoules').innerText = `${res.milliwatts.toFixed(0)} mW`;
+    document.getElementById('detailOps').innerText = res.ops;
 
-            if (instant_mW > BASELINE_MW) instant_mW = Math.ceil(instant_mW * 15);
-
-            res.last_ops = res.ops;
-            res.last_time = currentTime;
-
-            res.history.shift();
-            res.history.push(instant_mW);
-            res.timeLabels.shift();
-            res.timeLabels.push(currentTime.toFixed(1) + 's');
-
-            if (energyChart) {
-                energyChart.data.datasets[0].data = res.history;
-                energyChart.data.labels = res.timeLabels; 
-                energyChart.update('none'); 
-            }
-            
-            document.getElementById('detailJoules').innerHTML = `${instant_mW} <span class="text-xl">mW</span>`;
-        }
-    } else {
-        const avg_mW = Math.ceil(res.milliwatts);
-        document.getElementById('detailJoules').innerHTML = `${avg_mW} <span class="text-xl">mW</span>`;
-        if (energyChart) {
-            energyChart.data.datasets[0].data = res.history;
-            energyChart.update('none');
-        }
-    }
-    
-    document.getElementById('detailOps').innerText = res.ops.toLocaleString();
-    document.getElementById('breakdownCpu').innerText = `${(res.cpu_joules || 0).toFixed(6)} J`;
-    document.getElementById('breakdownMem').innerText = `${(res.mem_joules || 0).toFixed(6)} J`;
+    document.getElementById('breakdownCpu').innerText = `${res.cpu_joules.toFixed(6)} J`;
+    document.getElementById('breakdownMem').innerText = `${res.mem_joules.toFixed(6)} J`;
     document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
-    
-    generateActionableDiagnostics(res);
+
+    if (energyChart) {
+        energyChart.data.datasets[0].data = res.history;
+        energyChart.update('none'); 
+    }
+
+    // Delay evaluation logs until execution states complete or break
+    if (res.status !== 'RUNNING') {
+        generateFinalDiagnostics(res);
+    } else {
+        document.getElementById('suggestionText').innerHTML = `<div class="animate-pulse text-[#115e59] font-black text-center mt-4">⏳ Real-Time Workloads Active... Logging Traces Post-Run</div>`;
+    }
 }
 
 function updateCarouselUI() {
@@ -415,17 +381,13 @@ function updateCarouselUI() {
     updateLiveUI(current, current.duration || 0);
 }
 
-function prevDetail() { if (currentDetailIndex > 0) { currentDetailIndex--; updateCarouselUI(); } }
-function nextDetail() { if (currentDetailIndex < analysisResults.length - 1) { currentDetailIndex++; updateCarouselUI(); } }
-function jumpToDetail(index) { currentDetailIndex = index; updateCarouselUI(); }
+    const filenameEl = document.getElementById('detailFilename');
+    filenameEl.innerText = current.name;
+    filenameEl.classList.remove('text-gray-400');
+    filenameEl.classList.add('text-gray-800');
 
-// ==========================================
-// STATIC HEURISTIC DELIBERATIONS ENGINE
-// ==========================================
-function generateActionableDiagnostics(data) {
-    const suggestionEl = document.getElementById('suggestionText');
-    const cpuTrace = document.getElementById('cpuTraceContent');
-    const memTrace = document.getElementById('memTraceContent');
+    updateLiveUI(current);
+}
 
     let htmlContent = `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnostic Deliberations: ${data.name}</h4>`;
     
@@ -502,46 +464,81 @@ function generateActionableDiagnostics(data) {
             </div>`;
         }
 
-        // --- 2. STATIC LINTING LOGIC (SMALLER, COMPACT UI) ---
+// ==========================================
+// ANALYSIS ENGINE: STATIC RULE COMPLIANCE
+// ==========================================
+function generateFinalDiagnostics(data) {
+    const suggestionEl = document.getElementById('suggestionText');
+    const cpuTrace = document.getElementById('cpuTraceContent');
+    const memTrace = document.getElementById('memTraceContent');
+    
+    let htmlContent = "";
+    let cpuHtml = "";
+    let memHtml = "";
+    let issuesCount = 0;
+
+    htmlContent += `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Audit Diagnosis: ${data.name}</h4>`;
+    htmlContent += `<div class="space-y-3">`;
+
+    // [FIX]: Removed the 'return;' statement here!
+    // Now it will show the error, but keep going to process the linting rules and traces.
+    if (data.error) {
+        htmlContent += `<div class="p-3 bg-red-50 border-l-4 border-red-500 text-xs text-red-700">🛑 <strong>Execution Failure:</strong> ${data.error}</div>`;
+    }
+
+    const code = data.content || ""; 
+    const lines = code.split('\n');
+
+    lines.forEach((line, index) => {
+        const lineNum = index + 1; 
+        const trimmed = line.trim(); 
+        if (trimmed === "") return;
+
+        // Check each syntax pattern against our Abstract Rule Dictionary
         Object.entries(GREEN_LINT_RULES).forEach(([key, rule]) => {
             if (trimmed.match(rule.pattern)) {
                 htmlContent += `
-                    <div class="bg-white border-l-4 border-orange-500 rounded-lg shadow-sm p-4 text-sm">
-                        <div class="flex items-start mb-2 border-b border-gray-100 pb-2">
-                            <span class="font-black text-gray-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
+                    <div class="p-3 bg-white border-l-4 border-emerald-500 rounded shadow-sm text-xs">
+                        <div class="flex items-center gap-2 font-bold text-gray-900 mb-1">
+                            <span>${rule.icon}</span>
+                            <span>Line ${lineNum}: ${rule.type}</span>
                         </div>
-                        <p class="text-gray-600 text-xs mb-3 leading-relaxed">${rule.message}</p>
-                        
-                        <div class="grid grid-cols-1 gap-2">
-                            <div class="bg-red-50 rounded p-2 border border-red-100">
-                                <span class="text-red-600 font-bold block mb-1 uppercase tracking-widest text-[9px]">Detected (High Energy):</span>
-                                <code class="text-red-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm">${trimmed}</code>
-                            </div>
-                            
-                            <div class="bg-emerald-50 rounded p-2 border border-emerald-100">
-                                <span class="text-emerald-700 font-bold block mb-1 uppercase tracking-widest text-[9px]">Refactor To (Low Energy):</span>
-                                <code class="text-emerald-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm whitespace-pre-wrap">${rule.action}</code>
-                            </div>
-                        </div>
+                        <p class="text-[11px] text-gray-600 font-normal leading-relaxed">${rule.remedy}</p>
                     </div>`;
-                issuesFound++;
+                issuesCount++;
             }
         });
+
+        // Generate line-by-line tracing view allocations
+        if (trimmed.startsWith("for ") || trimmed.startsWith("while ") || trimmed.startsWith("def ")) {
+            let lineOps = data.ops > 0 ? Math.floor(data.ops * 0.95) : 0;
+            cpuHtml += `
+            <div class="flex justify-between items-center py-1.5 border-b border-blue-500/10 text-[11px]">
+                <span class="text-blue-200">Line ${lineNum}: <code>${trimmed.substring(0,20)}</code></span>
+                <span class="text-blue-300 font-bold">${lineOps.toLocaleString()} Ops</span>
+            </div>`;
+        }
+
+        if (trimmed.includes(".append(") || (trimmed.includes("=") && trimmed.includes("["))) {
+            memHtml += `
+            <div class="flex justify-between items-center py-1.5 border-b border-purple-500/10 text-[11px]">
+                <span class="text-purple-200">Line ${lineNum}: <code>${trimmed.substring(0,20)}</code></span>
+                <span class="text-purple-300 font-bold">${data.bytes.toLocaleString()} Bytes</span>
+            </div>`;
+        }
     });
 
-    cpuHtml += `</div>`; // Close scroll container
-    memHtml += `</div>`; // Close scroll container
-
-    if (issuesFound === 0) {
-        htmlContent += `<div class="text-center py-6 text-emerald-600 font-black text-sm uppercase tracking-wider">Structural Efficiency Verified</div>`;
+    // Only show the green compliant message if there are no issues AND no forced errors
+    if (issuesCount === 0 && !data.error) { 
+        htmlContent += `<div class="text-center py-4 text-emerald-600 font-black text-xs uppercase tracking-wider">🏆 Green-Compliant Architecture Verified</div>`; 
     }
     
     suggestionEl.innerHTML = htmlContent + `</div>`;
-
-    if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
-    if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
+    
+    // Traces will now safely inject into the UI even after a Force Stop
+    if (cpuTrace) cpuTrace.innerHTML = cpuHtml || '<span class="text-blue-300/70 font-mono text-[10px] uppercase tracking-widest">No dynamic CPU traces recorded.</span>';
+    if (memTrace) memTrace.innerHTML = memHtml || '<span class="text-purple-300/70 font-mono text-[10px] uppercase tracking-widest">No structural array traces recorded.</span>';
 }
-
 // ==========================================
 // CHART INIT & SUPABASE LOGIC
 // ==========================================
@@ -551,18 +548,23 @@ function setupChart() {
     energyChart = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
-            labels: Array(25).fill(''),
+            // [X-AXIS SECONDS UPGRADE]: Plot full timeline intervals
+            labels: Array.from({length: 25}, (_, i) => `${i}s`),
             datasets: [{
-                label: 'Instantaneous Power (mW)',
-                data: Array(25).fill(BASELINE_MW),
+                label: 'Compute Power Demand (mW)',
+                data: Array(25).fill(0),
                 borderColor: '#10b981',
                 backgroundColor: 'rgba(16, 185, 129, 0.2)',
                 borderWidth: 2, fill: true, tension: 0.1, pointRadius: 0
             }]
         },
         options: { 
-            responsive: true, maintainAspectRatio: false, 
-            scales: { y: { beginAtZero: true, suggestedMax: 50 } }, 
+            responsive: true, 
+            maintainAspectRatio: false, 
+            scales: { 
+                y: { beginAtZero: true, title: { display: true, text: 'Power (mW)' } },
+                x: { title: { display: true, text: 'Duration (Seconds)' } }
+            }, 
             animation: { duration: 0 } 
         }
     });
@@ -634,11 +636,6 @@ async function loadProfileData() {
     }
 }
 
-async function logoutUser() {
-    await supabaseClient.auth.signOut();
-    window.location.href = 'index.html'; 
-}
-
 // ==========================================
 // HISTORY FETCHING & SEARCHING
 // ==========================================
@@ -669,6 +666,169 @@ async function fetchAccountHistory() {
         tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-red-500 italic font-bold">Error connecting to database.</td></tr>';
         console.error("Supabase fetch error:", e);
     }
+    
+    let currentGroup = ""; 
+    dataToRender.forEach(row => {
+        const dateObj = new Date(row.created_at);
+        const datePart = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const timePart = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const groupKey = `${datePart} at ${timePart}`;
+
+        if (groupKey !== currentGroup) {
+            currentGroup = groupKey;
+            const headerTr = document.createElement('tr');
+            headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
+            headerTr.innerHTML = `
+                <td colspan="5" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
+                    ⏱ Computed on: <span class="text-emerald-700">${groupKey}</span>
+                    <span class="ml-2 text-emerald-600/50 text-[9px] font-bold tracking-wider">(CLICK TO SELECT ALL)</span>
+                    <input type="checkbox" class="hidden group-master-checkbox" data-group-master="${groupKey}">
+                </td>
+            `;
+            headerTr.onclick = function() {
+                const masterCb = this.querySelector('.group-master-checkbox');
+                masterCb.checked = !masterCb.checked;
+                const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+                checkboxes.forEach(cb => { if (cb.checked !== masterCb.checked) cb.closest('tr').click(); });
+            };
+            tableBody.appendChild(headerTr);
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
+        const displayFilename = row.filename ? row.filename : "script.py"; 
+        const preciseJoules = parseFloat(row.energy_joules);
+        const preciseKwh = parseFloat(row.energy_kwh) || (preciseJoules / 3600000);
+        
+        tr.innerHTML = `
+            <td class="py-3 px-4 text-gray-800 font-bold text-xs truncate max-w-[200px] relative">
+                <input type="checkbox" value="${row.id}" class="hidden history-checkbox" data-group="${groupKey}">
+                ${displayFilename}
+            </td>
+            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Complexity Ops</td>
+            <td class="py-3 px-4 font-mono text-purple-700">${row.peak_memory_bytes} B</td>
+            <td class="py-3 px-4 text-center font-black text-emerald-600">${preciseJoules.toFixed(6)} J</td>
+            <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
+        `;
+
+        tr.onclick = function() {
+            const cb = this.querySelector('.history-checkbox');
+            cb.checked = !cb.checked;
+            if (cb.checked) {
+                this.classList.remove('bg-white', 'hover:bg-emerald-50');
+                this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            } else {
+                this.classList.add('bg-white', 'hover:bg-emerald-50');
+                this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            }
+        };
+        tableBody.appendChild(tr);
+    });
+}
+
+function toggleSelectGroup(masterCheckbox, groupKey) {
+    const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+    checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+}
+
+function searchHistory() {
+    const query = document.getElementById('historySearch').value.toLowerCase();
+    
+    if (!query) {
+        renderHistoryTable(globalHistoryData);
+        return;
+    }
+    
+    const filteredData = globalHistoryData.filter(row => {
+        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
+        return filename.includes(query);
+    });
+    
+    renderHistoryTable(filteredData);
+}
+
+function renderHistoryTable(dataToRender) {
+    const tableBody = document.getElementById('dbHistoryTableBody');
+    tableBody.innerHTML = ''; 
+    
+    if (!dataToRender || dataToRender.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center opacity-50 italic">No execution matching search found.</td></tr>';
+        return;
+    }
+    
+    let currentGroup = ""; 
+
+    dataToRender.forEach(row => {
+        const dateObj = new Date(row.created_at);
+        const datePart = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const timePart = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const groupKey = `${datePart} at ${timePart}`;
+
+        if (groupKey !== currentGroup) {
+            currentGroup = groupKey;
+            const headerTr = document.createElement('tr');
+            
+            headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
+            headerTr.innerHTML = `
+                <td colspan="5" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
+                    ⏱ Computed on: <span class="text-emerald-700">${groupKey}</span>
+                    <span class="ml-2 text-emerald-600/50 text-[9px] font-bold tracking-wider">(CLICK TO SELECT ALL)</span>
+                    <input type="checkbox" class="hidden group-master-checkbox" data-group-master="${groupKey}">
+                </td>
+            `;
+
+            headerTr.onclick = function() {
+                const masterCb = this.querySelector('.group-master-checkbox');
+                masterCb.checked = !masterCb.checked;
+
+                const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+                checkboxes.forEach(cb => {
+                    if (cb.checked !== masterCb.checked) {
+                        cb.closest('tr').click(); 
+                    }
+                });
+            };
+            tableBody.appendChild(headerTr);
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
+        
+        const displayFilename = row.filename ? row.filename : "script.py"; 
+        const preciseJoules = parseFloat(row.energy_joules);
+        const preciseKwh = parseFloat(row.energy_kwh) || (preciseJoules / 3600000);
+        
+        tr.innerHTML = `
+            <td class="py-3 px-4 text-gray-800 font-bold text-xs truncate max-w-[200px] relative">
+                <input type="checkbox" value="${row.id}" class="hidden history-checkbox" data-group="${groupKey}">
+                ${displayFilename}
+            </td>
+            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Ops</td>
+            <td class="py-3 px-4 font-mono text-purple-700">${row.peak_memory_bytes} B</td>
+            <td class="py-3 px-4 text-center font-black text-emerald-600">${preciseJoules.toFixed(6)} J</td>
+            <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
+        `;
+
+        tr.onclick = function() {
+            const cb = this.querySelector('.history-checkbox');
+            cb.checked = !cb.checked;
+
+            if (cb.checked) {
+                this.classList.remove('bg-white', 'hover:bg-emerald-50');
+                this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            } else {
+                this.classList.add('bg-white', 'hover:bg-emerald-50');
+                this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            }
+        };
+
+        tableBody.appendChild(tr);
+    });
+}
+
+function toggleSelectGroup(masterCheckbox, groupKey) {
+    const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+    checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
 }
 
 function searchHistory() {
@@ -765,6 +925,7 @@ async function updateProfile() {
 
     try {
         const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+        
         if (!error) {
             msgElement.innerText = "Password updated securely in the cloud!";
             msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-emerald-600";
@@ -779,12 +940,9 @@ async function updateProfile() {
     }
 }
 
-async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
-    try {
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        if (!user) return;
-        await supabaseClient.from('history').insert([{ user_id: user.id, filename: filename, ops: ops, peak_memory_bytes: memory, energy_joules: joules, energy_kwh: kwh }]);
-    } catch (e) { console.error(e); }
+async function logoutUser() {
+    await supabaseClient.auth.signOut();
+    window.location.href = 'login.html';
 }
 
 function exportSelectedCSV() {
@@ -824,9 +982,80 @@ async function deleteSelectedHistory() {
     tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
 
     try {
-        const { error } = await supabaseClient.from('history').delete().in('id', selectedIds);
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            console.warn("User not logged in. History will not be saved.");
+            return;
+        }
+
+        const { error } = await supabaseClient.from('history').insert([{
+            user_id: user.id,
+            filename: filename,
+            ops: ops,
+            peak_memory_bytes: memory,
+            energy_joules: joules,
+            energy_kwh: kwh
+        }]);
+
         if (error) throw error;
+        console.log(`Successfully synced ${filename} data to Supabase.`);
+    } catch (e) {
+        console.error("Failed to sync with database:", e);
+    }
+}
+
+// ==========================================
+// CSV EXPORT & BATCH DELETION
+// ==========================================
+function exportSelectedCSV() {
+    const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+    if (checkboxes.length === 0) return alert("Please select at least one record to export.");
+
+    const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+    
+    const selectedData = globalHistoryData.filter(row => selectedIds.includes(row.id.toString()));
+    if (selectedData.length === 0) return alert("Error fetching data for export.");
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Filename,Operations,Peak Memory (Bytes),Energy (Joules),Energy (kWh),Date Computed\n"; 
+
+    selectedData.forEach(row => {
+        const dateStr = new Date(row.created_at).toLocaleString().replace(/,/g, ''); 
+        const csvRow = `${row.filename},${row.ops},${row.peak_memory_bytes},${row.energy_joules},${row.energy_kwh},${dateStr}`;
+        csvContent += csvRow + "\n";
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `GreenCode_Audit_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+async function deleteSelectedHistory() {
+    const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+    if (checkboxes.length === 0) return alert("Please select at least one record to delete.");
+
+    const confirmDelete = confirm(`Are you sure you want to permanently delete ${checkboxes.length} record(s)?`);
+    if (!confirmDelete) return;
+
+    const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+    const tableBody = document.getElementById('dbHistoryTableBody');
+    tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
+
+    try {
+        const { error } = await supabaseClient
+            .from('history')
+            .delete()
+            .in('id', selectedIds);
+
+        if (error) throw error;
+
         await fetchAccountHistory(); 
+
     } catch (error) {
         console.error("Error deleting records:", error);
         await fetchAccountHistory(); 
