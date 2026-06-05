@@ -22,7 +22,7 @@ let globalStartTime = 0;
 
 const C_CPU = 1.5e-9;
 const C_MEM = 2.25e-9;
-const BASELINE_MW = 2; // System idle power in milliwatts
+const BASELINE_MW = 2; 
 const C_BASE = 0.0005;
 
 // ==========================================
@@ -33,31 +33,36 @@ const GREEN_LINT_RULES = {
         pattern: /^\s*(while\s+True|while\s+1):/,
         type: "Infinite Loop Risk",
         message: "Unbounded loops permanently lock CPU threads, draining constant baseline power.",
-        action: "while condition_met:  # Add a deterministic break condition"
+        action: "while condition_met:  # Add a deterministic break condition",
+        fun_fact: "A CPU stuck in an infinite loop is like a car with a brick on the gas pedal in neutral. It gets incredibly hot, burns maximum fuel, and goes absolutely nowhere."
     },
     "nested_loop": {
-        pattern: /^\s{4,}(for|while)\b/, 
+        pattern: /^\s{8,}for\s+[a-zA-Z0-9_]+\s+in\s+[a-zA-Z0-9_]+:\s*$/, 
         type: "O(n²) Complexity Spike",
         message: "Nested iteration causes exponential operation growth. A 100-item list requires 10,000 ops.",
-        action: "hash_map = {item.id: item}  # Flatten to O(n) using a dictionary lookup"
+        action: "hash_map = {item.id: item}  # Flatten to O(n) using a dictionary lookup",
+        fun_fact: "Nesting loops is like asking a teacher to check every student's homework against every other student's homework. By using a dictionary, you give the system a master index, cutting operations by 99%."
     },
     "sleep_block": {
-        pattern: /time\.sleep\(/,
+        pattern: /^\s*time\.sleep\(/,
         type: "Synchronous Thread Block",
         message: "Hardware clocks remain active and consume power while waiting for synchronous sleep timers.",
-        action: "await asyncio.sleep(n)  # Yield thread control back to the OS"
+        action: "await asyncio.sleep(n)  # Yield thread control back to the OS",
+        fun_fact: "Synchronous sleep forces the CPU to actively count the seconds while waiting. Yielding asynchronously lets the CPU take a micro-nap and handle other tasks until the timer finishes."
     },
     "io_print": {
-        pattern: /^\s+(print|sys\.stdout\.write)\(/,
+        pattern: /^\s+(print|sys\.stdout\.write)\([^"']+\)/,
         type: "I/O Hardware Wake",
         message: "Calling standard output inside a loop triggers hardware interrupts repeatedly.",
-        action: "buffer.append(data)\nprint(''.join(buffer))  # Batch output outside the loop"
+        action: "buffer.append(data)\nprint(''.join(buffer))  # Batch output outside the loop",
+        fun_fact: "Printing to the screen forces the CPU to wake up the operating system kernel. Doing this 10,000 times inside a loop is like carrying groceries from your car one grape at a time."
     },
     "memory_load": {
         pattern: /\.(read|readlines)\(\)/,
         type: "RAM Saturation",
         message: "Loading entire file objects into memory forces garbage collection and swap-file usage.",
-        action: "for line in file:  # Use a generator/iterator for lazy loading"
+        action: "for line in file:  # Use a generator/iterator for lazy loading",
+        fun_fact: "Loading a giant file into RAM all at once is like trying to swallow a watermelon whole. Reading it line-by-line allows the hardware to process the data without overflowing the memory banks."
     }
 };
 
@@ -102,7 +107,7 @@ async function handleFiles(files) {
         uploadedFiles.forEach(file => {
             previewList.innerHTML += `
                 <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
-                    📄 ${file.name}
+                    [FILE] ${file.name}
                 </span>`;
         });
     }
@@ -228,7 +233,7 @@ async function executeBatch(scriptArray) {
         }, 10);
     }
 
-    updateStatus("BOOTING ENGINE...", "text-yellow-300 animate-pulse");
+    updateStatus("BOOTING ENGINE...", "text-yellow-300");
     document.getElementById('forceStopBtn').classList.remove('hidden'); 
     
     analysisResults = scriptArray.map(script => ({
@@ -259,7 +264,7 @@ async function executeBatch(scriptArray) {
         setTimeout(() => { overlay.classList.add('hidden'); }, 300); 
     }
 
-    updateStatus("ANALYZING...", "text-blue-400 animate-pulse");
+    updateStatus("ANALYZING...", "text-blue-400");
     logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
     
     globalStartTime = Date.now();
@@ -288,6 +293,8 @@ async function executeBatch(scriptArray) {
 
         const results = await Promise.all(tasks);
         
+        let finalMaxDuration = 0;
+
         for (let i = 0; i < results.length; i++) {
             const finalRes = results[i].data;
             const resState = analysisResults[i];
@@ -305,6 +312,8 @@ async function executeBatch(scriptArray) {
                 resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
                 resState.duration = finalRes.duration_sec || ((Date.now() - globalStartTime) / 1000);
                 
+                if (resState.duration > finalMaxDuration) finalMaxDuration = resState.duration;
+
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
                 resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
@@ -317,6 +326,12 @@ async function executeBatch(scriptArray) {
             }
             updateTableRow(i, resState);
         }
+        
+        clearInterval(executionTimerInterval);
+        if (timerEl && finalMaxDuration > 0) {
+            timerEl.innerText = finalMaxDuration.toFixed(2) + "s";
+        }
+
         updateCarouselUI(); 
 
     } catch (err) {
@@ -400,7 +415,6 @@ function updateLiveUI(res, currentTime) {
         }
     }
     
-    // Updates for new JSON/Visualizer metrics
     let current_J = (res.cpu_joules || 0) + (res.mem_joules || 0) + C_BASE;
     document.getElementById('detailJoules').textContent = current_J.toFixed(6) + " J";
     
@@ -409,52 +423,84 @@ function updateLiveUI(res, currentTime) {
     document.getElementById('breakdownMem').innerText = `${(res.mem_joules || 0).toFixed(6)} J`;
     document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
 
-    // Update dynamic formula 
     document.getElementById('dynCpu').textContent = (res.cpu_joules || 0).toFixed(6);
     document.getElementById('dynMem').textContent = (res.mem_joules || 0).toFixed(6);
     document.getElementById('dynTotal').textContent = current_J.toFixed(6);
     document.getElementById('dynTime').textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
     
-    // 1. Capture the exact number of architectural warnings found
-    const issuesFound = generateActionableDiagnostics(res);
+    const diagnostics = generateActionableDiagnostics(res);
+    const issuesFound = diagnostics ? diagnostics.count : 0;
+    const funFactsArray = diagnostics ? diagnostics.facts : [];
 
-    // --- ENTERPRISE SCALED REAL WORLD IMPACT LOGIC ---
-    // Scale up to Enterprise Load: Assume 100 executions per second for 1 year (31,536,000 seconds)
-    const enterprise_executions_per_year = 3153600000; 
-    const annual_joules = current_J * enterprise_executions_per_year;
+    // --- NEW ENTERPRISE NORMALIZED MATH LOGIC ---
+    // Instead of scaling purely by 10 seconds of runtime, we scale by "Energy per Operation"
+    // Assuming an enterprise data center executes 1 Quadrillion Operations (1,000,000,000,000,000) a year.
+    const enterprise_ops_per_year = 1000000000000000;
+    let annual_joules = 0;
+
+    if (res.ops > 0) {
+        annual_joules = (current_J / res.ops) * enterprise_ops_per_year;
+    } else {
+        // Fallback if 0 ops to prevent division by zero
+        annual_joules = current_J * 3153600000; 
+    }
+
     const annual_kwh = annual_joules / 3600000;
 
-    // Relatable Equivalents:
-    // 1 smartphone charge = ~15 Wh = 0.015 kWh
     const smartphone_charges = Math.floor(annual_kwh / 0.015).toLocaleString();
-    // 10W LED bulb hours = annual_kwh / 0.010 kW
     const led_hours = Math.floor(annual_kwh / 0.010).toLocaleString();
     
     const impactCard = document.getElementById('ecoImpactCard');
     const impactHeader = document.getElementById('ecoImpactHeader');
     const impactText = document.getElementById('ecoImpactText');
 
+    const funFactCard = document.getElementById('funFactCard');
+    const funFactHeader = document.getElementById('funFactHeader');
+    const funFactText = document.getElementById('funFactText');
+
     if (res.status === 'RUNNING') {
         impactText.innerText = "Scanning telemetry to scale environmental footprint...";
-        impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors animate-pulse";
-        impactHeader.className = "text-xs font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2";
+        impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+        impactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
         impactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
+
+        funFactText.innerText = "Extracting architectural insights...";
+        funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+        funFactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
+        funFactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
+
     } else {
-        // Tie the impact directly to whether the code has structural flaws!
         if (issuesFound > 0) { 
-            // BAD CODE: Structural Flaws Found
-            impactText.innerHTML = `⚠️ <b>Heavy Footprint:</b> Deployed at enterprise scale (100 req/sec), this unoptimized architecture would consume <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b> annually. That wasted baseline energy is equivalent to fully charging a smartphone <b>${smartphone_charges} times</b> or leaving a 10W LED bulb on for <b>${led_hours} hours</b> continuously.`;
-            
-            // Red/Orange Styling matching the suggestions panel
-            impactHeader.className = "text-xs font-black text-red-600 uppercase tracking-widest mb-4 flex items-center gap-2";
+            impactText.innerHTML = `[HEAVY FOOTPRINT] Deployed at enterprise data center scale (1 Quadrillion ops/year), this unoptimized architecture would consume <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b> annually. That wasted baseline energy is equivalent to fully charging a smartphone <b>${smartphone_charges} times</b> or leaving a 10W LED bulb on for <b>${led_hours} hours</b> continuously.`;
+            impactHeader.className = "text-md font-black text-red-600 uppercase tracking-widest mb-4 text-center";
             impactText.className = "flex-1 bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+
+            let factsHtml = `<div class="flex flex-col gap-3">`;
+            funFactsArray.forEach(f => {
+                factsHtml += `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">${f.title}</span>${f.fact}</div>`;
+            });
+            factsHtml += `</div>`;
+
+            funFactText.innerHTML = factsHtml;
+            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
+            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
+
         } else { 
-            // GOOD CODE: 0 Structural Flaws
-            impactText.innerHTML = `🌱 <b>Eco-Optimized:</b> By implementing structural optimization, you successfully prevented hardware burnout. At enterprise scale, this refactored footprint scales highly efficiently, capping annual baseline consumption to a sustainable <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b>.`;
-            
-            // Green Styling matching the suggestions panel
-            impactHeader.className = "text-xs font-black text-emerald-700 uppercase tracking-widest mb-4 flex items-center gap-2";
+            impactText.innerHTML = `[ECO-OPTIMIZED] By implementing structural optimization, you successfully prevented hardware burnout. At enterprise data center scale (1 Quadrillion ops/year), this refactored footprint scales highly efficiently, capping annual baseline consumption to a sustainable <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b>.`;
+            impactHeader.className = "text-md font-black text-emerald-700 uppercase tracking-widest mb-4 text-center";
             impactText.className = "flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+
+            const goodFacts = [
+                "Using dictionary lookups is like having a VIP fast-pass at an amusement park. Instead of checking 1,000,000 items in a nested loop, the CPU jumps straight to the exact data point instantly.",
+                "Batching operations is like carrying all your groceries from the car in one giant trip. It might look silly in the code, but it saves your CPU from waking up the operating system 100 separate times.",
+                "Keeping your RAM usage low is like keeping your desk clean. When your CPU doesn't have to dig through piles of massive files to find a variable, it uses significantly less electrical power.",
+                "Async functions let your CPU take a micro-nap while waiting for a network response, completely shutting off power draw. Synchronous functions force the CPU to hold its breath and burn energy while waiting."
+            ];
+            const randomFact = goodFacts[Math.floor(Math.random() * goodFacts.length)];
+
+            funFactText.innerHTML = `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">Architecture Verified</span>${randomFact}</div>`;
+            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
+            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
         }
     }
 }
@@ -481,15 +527,17 @@ function generateActionableDiagnostics(data) {
     let htmlContent = `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnostic Deliberations: ${data.name}</h4>`;
     
     if (data.status === 'RUNNING') {
-        suggestionEl.innerHTML = htmlContent + `<div class="animate-pulse text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest">Scanning Syntax Trees...</div>`;
-        if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest animate-pulse">Tracing Execution Map...</span>';
-        if (memTrace) memTrace.innerHTML = '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest animate-pulse">Mapping Memory Pointers...</span>';
-        return 0; // Return 0 during running state
+        suggestionEl.innerHTML = htmlContent + `<div class="text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest">Scanning Syntax Trees...</div>`;
+        if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">Tracing Execution Map...</span>';
+        if (memTrace) memTrace.innerHTML = '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">Mapping Memory Pointers...</span>';
+        return { count: 0, facts: [] }; 
     }
 
     const code = data.content || ""; 
     const lines = code.split('\n');
     let issuesFound = 0;
+    let collectedFacts = []; 
+    
     let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
     let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
 
@@ -500,7 +548,6 @@ function generateActionableDiagnostics(data) {
         const lineNum = index + 1;
         if (trimmed === "") return;
 
-        // --- 1. CPU & MEMORY TRACE LOGIC (LINE BY LINE WITH JOULES) ---
         if (trimmed.startsWith("for ") || trimmed.startsWith("while ") || trimmed.startsWith("def ")) {
             let lineOps = data.ops > 0 ? Math.floor(data.ops * 0.98) : 0;
             if (trimmed.startsWith("def ")) lineOps = data.ops > 0 ? Math.floor(data.ops * 0.05) : 0;
@@ -553,28 +600,35 @@ function generateActionableDiagnostics(data) {
             </div>`;
         }
 
-        // --- 2. STATIC LINTING LOGIC (SMALLER, COMPACT UI) ---
+        // --- 2. STATIC LINTING LOGIC ---
         Object.entries(GREEN_LINT_RULES).forEach(([key, rule]) => {
-            if (trimmed.match(rule.pattern)) {
+            if (line.match(rule.pattern)) {
                 htmlContent += `
-                    <div class="bg-white border-l-4 border-orange-500 rounded-lg shadow-sm p-4 text-sm">
-                        <div class="flex items-start mb-2 border-b border-gray-100 pb-2">
-                            <span class="font-black text-gray-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
+                    <div class="bg-white border-l-4 border-orange-500 rounded-xl shadow-md mb-4 overflow-hidden">
+                        <div class="bg-orange-50 px-4 py-3 border-b border-orange-100 flex items-center gap-2">
+                            <span class="font-black text-orange-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
                         </div>
-                        <p class="text-gray-600 text-xs mb-3 leading-relaxed">${rule.message}</p>
-                        
-                        <div class="grid grid-cols-1 gap-2">
-                            <div class="bg-red-50 rounded p-2 border border-red-100">
-                                <span class="text-red-600 font-bold block mb-1 uppercase tracking-widest text-[9px]">Detected (High Energy):</span>
-                                <code class="text-red-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm">${trimmed}</code>
-                            </div>
+                        <div class="p-4">
+                            <p class="text-gray-700 text-sm mb-4 font-medium">${rule.message}</p>
                             
-                            <div class="bg-emerald-50 rounded p-2 border border-emerald-100">
-                                <span class="text-emerald-700 font-bold block mb-1 uppercase tracking-widest text-[9px]">Refactor To (Low Energy):</span>
-                                <code class="text-emerald-900 font-mono text-[10px] block bg-white p-1 rounded shadow-sm whitespace-pre-wrap">${rule.action}</code>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-red-50/50 rounded-lg p-3 border border-red-100">
+                                    <span class="text-red-500 font-black block mb-2 uppercase tracking-widest text-[10px]">[DETECTED: HEAVY]</span>
+                                    <code class="text-red-800 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-red-50">${trimmed}</code>
+                                </div>
+                                
+                                <div class="bg-emerald-50/50 rounded-lg p-3 border border-emerald-100">
+                                    <span class="text-emerald-700 font-black block mb-2 uppercase tracking-widest text-[10px]">[REFACTOR: GREEN]</span>
+                                    <code class="text-emerald-900 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-emerald-50 whitespace-pre-wrap">${rule.action}</code>
+                                </div>
                             </div>
                         </div>
                     </div>`;
+                
+                if (!collectedFacts.some(f => f.title === rule.type)) {
+                    collectedFacts.push({ title: rule.type, fact: rule.fun_fact });
+                }
+                
                 issuesFound++;
             }
         });
@@ -592,8 +646,7 @@ function generateActionableDiagnostics(data) {
     if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
     if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
 
-    // Crucial fix: return the number of structural flaws found
-    return issuesFound;
+    return { count: issuesFound, facts: collectedFacts };
 }
 
 // ==========================================
