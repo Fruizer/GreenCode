@@ -1,331 +1,954 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenCode | Energy Analyzer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js" defer></script>
-    <style>
-        /* 1. Tactical Grid Background */
-        body { 
-            background-color: #d1d5db; 
-            background-image: radial-gradient(#9ca3af 1px, transparent 1px);
-            background-size: 20px 20px;
-        } 
-        
-        /* The existing Glass Card */
-        .glass-card { 
-            background: rgba(255, 255, 255, 0.95); 
-            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.2); 
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            backdrop-filter: blur(10px);
+// app.js
+
+// ==========================================
+// SUPABASE CONFIGURATION
+// ==========================================
+const supabaseUrl = 'https://fadbccudiffeneemlmvb.supabase.co';
+const supabaseKey = 'sb_publishable__VXBEPzv_zSCuysL-UO02Q_LQ2kHh8z';
+const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+// ==========================================
+// STATE MANAGEMENT & CONSTANTS
+// ==========================================
+let uploadedFiles = []; 
+let analysisResults = []; 
+let currentDetailIndex = 0; 
+let energyChart;
+let activeWorkers = []; 
+let globalHistoryData = []; 
+
+let executionTimerInterval; 
+let globalStartTime = 0;
+
+const C_CPU = 1.5e-9;
+const C_MEM = 2.25e-9;
+const BASELINE_MW = 2; 
+const C_BASE = 0.0005;
+
+// ==========================================
+// PATTERN-BASED STATIC ANALYSIS DICTIONARY
+// ==========================================
+const GREEN_LINT_RULES = {
+    "infinite_loop": {
+        pattern: /^\s*(while\s+True|while\s+1):/,
+        type: "Infinite Loop Risk",
+        message: "Unbounded loops permanently lock CPU threads, draining constant baseline power.",
+        action: "while condition_met:  # Add a deterministic break condition",
+        fun_fact: "A CPU stuck in an infinite loop is like a car with a brick on the gas pedal in neutral. It gets incredibly hot, burns maximum fuel, and goes absolutely nowhere."
+    },
+    "nested_loop": {
+        pattern: /^\s{8,}for\s+[a-zA-Z0-9_]+\s+in\s+[a-zA-Z0-9_]+:\s*$/, 
+        type: "O(n²) Complexity Spike",
+        message: "Nested iteration causes exponential operation growth. A 100-item list requires 10,000 ops.",
+        action: "hash_map = {item.id: item}  # Flatten to O(n) using a dictionary lookup",
+        fun_fact: "Nesting loops is like asking a teacher to check every student's homework against every other student's homework. By using a dictionary, you give the system a master index, cutting operations by 99%."
+    },
+    "sleep_block": {
+        pattern: /^\s*time\.sleep\(/,
+        type: "Synchronous Thread Block",
+        message: "Hardware clocks remain active and consume power while waiting for synchronous sleep timers.",
+        action: "await asyncio.sleep(n)  # Yield thread control back to the OS",
+        fun_fact: "Synchronous sleep forces the CPU to actively count the seconds while waiting. Yielding asynchronously lets the CPU take a micro-nap and handle other tasks until the timer finishes."
+    },
+    "io_print": {
+        pattern: /^\s+(print|sys\.stdout\.write)\([^"']+\)/,
+        type: "I/O Hardware Wake",
+        message: "Calling standard output inside a loop triggers hardware interrupts repeatedly.",
+        action: "buffer.append(data)\nprint(''.join(buffer))  # Batch output outside the loop",
+        fun_fact: "Printing to the screen forces the CPU to wake up the operating system kernel. Doing this 10,000 times inside a loop is like carrying groceries from your car one grape at a time."
+    },
+    "memory_load": {
+        pattern: /\.(read|readlines)\(\)/,
+        type: "RAM Saturation",
+        message: "Loading entire file objects into memory forces garbage collection and swap-file usage.",
+        action: "for line in file:  # Use a generator/iterator for lazy loading",
+        fun_fact: "Loading a giant file into RAM all at once is like trying to swallow a watermelon whole. Reading it line-by-line allows the hardware to process the data without overflowing the memory banks."
+    }
+};
+
+window.onload = function() {
+    setupChart();
+    setupDragAndDrop();
+};
+
+// ==========================================
+// DRAG AND DROP & FILE HANDLING
+// ==========================================
+function setupDragAndDrop() {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileUpload');
+    if (!dropzone || !fileInput) return;
+
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
+    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('dropzone-active'); });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dropzone-active');
+        handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+}
+
+async function handleFiles(files) {
+    uploadedFiles = []; 
+    for (let file of files) {
+        if (file.name.endsWith('.py')) {
+            const text = await file.text();
+            uploadedFiles.push({ name: file.name, content: text });
         }
-        
-        .dropzone-active { 
-            border-color: #10b981 !important; 
-            background-color: #ecfdf5 !important; 
-            box-shadow: inset 0 0 20px rgba(16, 185, 129, 0.2);
-        }
-        
-        .tab-hidden { display: none !important; }
-
-        /* 2. Custom Sleek Scrollbars */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { 
-            background: #10b981; 
-            border-radius: 10px; 
-        }
-        ::-webkit-scrollbar-thumb:hover { background: #047857; }
-
-        /* 3. Terminal & Focus Glows */
-        #terminalContainer {
-            box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
-        }
-    </style>
-</head>
-<body class="font-sans min-h-screen text-gray-800">
-
-    <nav class="bg-[#115e59] p-4 text-white shadow-md sticky top-0 z-50">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold tracking-tight">GreenCode <span class="text-emerald-300 font-light italic">By GILBERTO Systems</span></h1>
-            <div class="flex gap-6 font-bold text-xs uppercase tracking-widest">
-                <button onclick="switchTab('analyzer')" id="nav-analyzer" class="text-emerald-300 border-b-2 border-emerald-300">Analyzer</button>
-                <button onclick="switchTab('history')" id="nav-history" class="text-white/60 hover:text-white transition-colors">My History</button>
-                <button onclick="switchTab('profile')" id="nav-profile" class="text-white/60 hover:text-white transition-colors">Profile</button>
-            </div>
-            <div class="flex items-center gap-4">
-                <button onclick="forceStopWorkers()" id="forceStopBtn" class="hidden bg-red-500 hover:bg-red-400 text-white font-black text-[10px] px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg animate-pulse">Force Stop</button>
-                
-                <div id="engineStatus" class="flex items-center gap-2 px-3 py-1 bg-emerald-900 rounded-full">
-                    <span id="statusIndicator" class="text-[10px] text-emerald-300 font-black tracking-widest uppercase">SYSTEM IDLE</span>
-                    <span id="liveTimer" class="text-[11px] text-emerald-400 font-mono bg-emerald-950 px-2 py-0.5 rounded shadow-inner hidden">0.00s</span>
-                </div>
-                <button onclick="logoutUser()" class="text-[10px] bg-red-600 hover:bg-red-700 px-3 py-1 rounded-full font-bold uppercase transition-all">Logout</button>
-            </div>
-        </div>
-    </nav>
-
-    <main id="tab-analyzer" class="container mx-auto mt-6 p-4 flex flex-col gap-6 mb-12">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <section class="glass-card p-6 rounded-2xl flex flex-col">
-                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4">Live Execution Input</h2>
-                <textarea id="zcodeInput" class="w-full p-4 bg-[#111827] text-emerald-400 font-mono text-xs rounded-t-xl border-b border-emerald-500 focus:outline-none" style="height: 180px;" placeholder="print('Hello World')"></textarea>            
-                <div id="terminalContainer" class="w-full bg-black rounded-b-xl p-4 font-mono text-xs mb-4 overflow-y-auto" style="height: 100px;">
-                    <div id="terminalBody" class="text-emerald-100/80 leading-relaxed whitespace-pre-wrap"><span class="text-emerald-500">guest:~$</span> Ready for input.</div>
-                </div>
-                <button onclick="runEditorAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
-            </section>
-
-            <section class="glass-card p-6 rounded-2xl flex flex-col relative">
-                <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 opacity-0">File Upload</h2>
-                <div id="dropzone" class="flex-1 border-4 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center p-6 mb-4 transition-all bg-gray-100 hover:bg-gray-50 cursor-pointer">
-                    <p class="text-gray-600 font-bold text-lg text-center">Drag & Drop<br>FILES</p>
-                    <p class="text-xs text-gray-400 mt-2" id="fileCountDisplay">0 files selected</p>
+    }
     
-                    <div id="filePreviewList" class="flex flex-wrap gap-2 mt-4 justify-center w-full max-h-[70px] overflow-y-auto px-2 custom-scrollbar"></div>
+    const countDisplay = document.getElementById('fileCountDisplay');
+    if (countDisplay) countDisplay.innerText = `${uploadedFiles.length} file(s) ready for analysis.`;
 
-                    <input type="file" id="fileUpload" multiple accept=".py" class="hidden">
-                    <button onclick="document.getElementById('fileUpload').click()" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg text-xs shadow">choose a file on your computer</button>
-                </div>
-                <button onclick="runFileAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
-            </section>
-        </div>
+    const previewList = document.getElementById('filePreviewList');
+    if (previewList) {
+        previewList.innerHTML = ''; 
+        uploadedFiles.forEach(file => {
+            previewList.innerHTML += `
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
+                    [FILE] ${file.name}
+                </span>`;
+        });
+    }
 
-        <section class="glass-card p-6 rounded-2xl">
-            <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4">Analysis Results</h2>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm font-mono">
-                    <tbody id="analysisTableBody" class="text-gray-600">
-                        <tr class="bg-gray-100"><td colspan="5" class="py-4 text-center text-xs opacity-50">No data available. Run an analysis.</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+    logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
+}
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" id="detailSection">
-            <section class="lg:col-span-2 flex items-center gap-4">
-                <button onclick="prevDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
-                    <span class="text-xl leading-none">&larr;</span>
-                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Prev</span>
-                </button>
-
-                <div class="flex-1 flex flex-col gap-4">
-                    
-                    <div class="glass-card p-6 rounded-2xl flex flex-col items-center">
-                        <h3 class="text-sm font-black text-[#115e59] uppercase tracking-widest mb-2">Real-Time Physics Model</h3>
-                        <div class="w-full h-48 bg-white border border-gray-200 rounded p-2 mb-4">
-                            <canvas id="energyChart"></canvas>
-                        </div>
-                        <h4 id="detailFilename" class="font-black text-lg tracking-wider uppercase text-center break-all text-gray-400">AWAITING SCRIPT</h4>
-                    </div>
-
-                   <div class="grid grid-cols-2 gap-4">
-                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-emerald-500 flex flex-col justify-center">
-                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Compute Power</p>
-                            <div class="flex items-baseline justify-center gap-2 mt-1">
-                                <p id="detailMilliwatts" class="text-2xl lg:text-3xl font-black text-[#115e59]">0 <span class="text-xl">mW</span></p>
-                            </div>
-                            <p class="text-[10px] text-emerald-700 font-bold tracking-widest uppercase mt-1">
-                                Absolute Work: <span id="detailJoules">0.000000 J</span>
-                            </p>
-                        </div>
-                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
-                            <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
-                            <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800">0</p>
-                        </div>
-                    </div>  
-
-                    <div class="glass-card p-6 rounded-xl bg-gray-50 border border-gray-200 shadow-sm">
-                        
-                        <div class="flex items-center justify-between border-b border-gray-200 pb-2 mb-4">
-                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Thermodynamic Math Proof</p>
-                            <span class="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest px-2 py-0.5 rounded shadow-sm border border-emerald-200">HEURISTIC ESTIMATION</span>
-                        </div>
-
-                        <div class="bg-[#111827] text-emerald-400 p-3 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
-                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// HEURISTIC EQUATION GUIDE</p>
-                            <p><span class="text-blue-400 font-bold">CPU Work (Joules)</span> = N_Ops × 1.5e-9</p>
-                            <p><span class="text-purple-400 font-bold">Memory Work (Joules)</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9</p>
-                            <div class="border-t border-gray-700 mt-2 pt-2 text-gray-300 font-mono text-[9px] sm:text-[10px]">
-                                <p>Total Energy (J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> + <span id="dynMem" class="text-purple-400 font-black">0.000000</span> + <span class="text-gray-400">0.000500</span></p>
-                                <p class="mt-1">Avg Power (mW) = ( <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> / <span id="dynTime" class="text-white font-black">0.00s</span> ) * 1000</p>
-                            </div>
-                        </div>
-                        
-                        <div class="flex flex-col gap-3 text-sm font-mono text-gray-700">
-                            
-                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-blue-500 overflow-hidden">
-                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors" onclick="document.getElementById('cpuTracePanel').classList.toggle('hidden')">
-                                    <div class="flex items-center gap-3">
-                                        <span class="font-bold text-gray-600">Live CPU Work:</span>
-                                        <span class="bg-blue-100 text-blue-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-blue-200 transition">(Click for trace)</span>
-                                    </div>
-                                    <span id="breakdownCpu" class="text-blue-600 font-black">0.000000 J</span>
-                                </div>
-                                <div id="cpuTracePanel" class="hidden bg-[#273f87] text-white p-4 border-t border-gray-200 shadow-inner">
-                                    <p class="text-[10px] text-blue-200 font-black tracking-widest uppercase mb-2">CPU Line Trace:</p>
-                                    <div class="border-t border-blue-400/30 w-full mb-2"></div>
-                                    <p class="text-xs text-blue-100/70" id="cpuTraceContent">Awaiting execution data...</p>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-purple-500 overflow-hidden">
-                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-purple-50 transition-colors" onclick="document.getElementById('memTracePanel').classList.toggle('hidden')">
-                                    <div class="flex items-center gap-3">
-                                        <span class="font-bold text-gray-600">Live Memory Work:</span>
-                                        <span class="bg-purple-100 text-purple-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-purple-200 transition">(Click for trace)</span>
-                                    </div>
-                                    <span id="breakdownMem" class="text-purple-600 font-black">0.000000 J</span>
-                                </div>
-                                <div id="memTracePanel" class="hidden bg-[#58219c] text-white p-4 border-t border-gray-200 shadow-inner">
-                                    <p class="text-[10px] text-purple-200 font-black tracking-widest uppercase mb-2">Memory Line Trace:</p>
-                                    <div class="border-t border-purple-400/30 w-full mb-2"></div>
-                                    <p class="text-xs text-purple-100/70" id="memTraceContent">Awaiting execution data...</p>
-                                </div>
-                            </div>
-
-                            <div class="flex justify-between items-center px-4 py-3 rounded bg-white shadow-sm border-l-4 border-gray-400">
-                                <span class="font-bold text-gray-600">System Base:</span>
-                                <span id="breakdownBase" class="text-gray-500 font-black">0.000500 J</span>
-                            </div>
-                            
-                        </div>
-                    </div>
-
-                </div>
-
-                <button onclick="nextDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
-                    <span class="text-xl leading-none">&rarr;</span>
-                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Next</span>
-                </button>
-            </section>
-
-            <div class="flex flex-col gap-6 h-fit">
-                
-                <section class="glass-card p-6 rounded-2xl flex flex-col">
-                    <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions & Deliberations</h2>
-                    <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[400px]">
-                        <p id="suggestionText" class="text-sm font-bold text-gray-600 whitespace-pre-wrap">System ready. Input your code or upload files to begin analysis.</p>
-                    </div>
-                </section>
-                
-                <section id="ecoImpactCard" class="glass-card p-6 rounded-2xl flex flex-col transition-colors">
-                    <h2 id="ecoImpactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
-                        Real-World Impact Equivalent
-                    </h2>
-                    <div id="ecoImpactText" class="flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed">
-                        Awaiting workload completion to calculate environmental equivalents.
-                    </div>
-                </section>
-
-                <section id="funFactCard" class="glass-card p-6 rounded-2xl flex flex-col transition-colors">
-                    <h2 id="funFactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
-                        Engineering Fun Facts
-                    </h2>
-                    <div id="funFactText" class="flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed">
-                        Awaiting workload completion for architectural insights.
-                    </div>
-                </section>
-
-            </div>
-            </div>
-    </main>
-
-    <section id="tab-history" class="container mx-auto mt-6 p-4 tab-hidden mb-12">
-        <div class="glass-card p-6 rounded-2xl">
-            
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-xl font-black text-[#115e59] uppercase tracking-widest">Execution History</h2>
+// ==========================================
+// LEXICAL ANALYSIS & WORKER EXECUTION
+// ==========================================
+function instrumentPythonCodeJS(rawCode) {
+    const lines = rawCode.split('\n');
+    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0}'];
     
-                <div class="flex items-center gap-3">
-                    <div class="relative">
-                        <input type="text" id="historySearch" onkeyup="searchHistory()" placeholder="Search files..." autocomplete="off" class="pl-8 pr-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#115e59]">
-                        <svg class="w-4 h-4 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                </div>
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        if (line.match(/=\s*\[(.*?)\]/)) line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
+        instrumentedCode.push(line);
         
-                <button onclick="exportSelectedCSV()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
-                    Export
-                </button>
-                <button onclick="deleteSelectedHistory()" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-2 px-4 rounded-xl uppercase tracking-wide transition-colors shadow-sm flex items-center gap-1">
-                    Delete
-                </button>
-            </div>
-        </div>
+        if (line.match(/^\s*(for|while|def)\b.*:/)) {
+            let nextLineIndent = "    "; 
+            for (let j = i + 1; j < lines.length; j++) {
+                if (lines[j].trim() !== "") {
+                    let match = lines[j].match(/^(\s+)/);
+                    if (match) nextLineIndent = match[1];
+                    else nextLineIndent = line.match(/^(\s*)/)[1] + "    ";
+                    break;
+                }
+            }
+            instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
+            instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
+        }
+    }
+    return instrumentedCode.join('\n');
+}
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm font-mono bg-gray-50 rounded-lg overflow-hidden shadow-inner">
-                    <thead class="bg-gray-200 text-gray-700 text-xs uppercase tracking-wider">
-                        <tr>
-                            <th class="py-3 px-4">File Name</th>
-                            <th class="py-3 px-4">Complexity Ops</th>
-                            <th class="py-3 px-4">Peak Memory</th>
-                            <th class="py-3 px-4 text-center">Avg Power (mW)</th>
-                            <th class="py-3 px-4 text-center">Total kWh</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dbHistoryTableBody" class="text-gray-600">
-                        </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
+function runWorkerTask(scriptName, rawCode, onTelemetry) {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker('worker.js?v=' + Date.now());
+        activeWorkers.push({ worker: worker, name: scriptName, resolve: resolve, reject: reject }); 
 
-    <section id="tab-profile" class="container mx-auto mt-6 p-4 max-w-md tab-hidden mb-12">
-        <div class="glass-card p-8 rounded-2xl text-center border-t-4 border-[#115e59] shadow-xl">
+        const instrumented = instrumentPythonCodeJS(rawCode);
+
+        worker.onmessage = function(e) {
+            const { type, data, error, ops, mem } = e.data;
+            if (type === "TELEMETRY") {
+                if (onTelemetry) onTelemetry(ops, mem); 
+            } else if (type === "READY") {
+                worker.postMessage({ userCode: instrumented });
+            } else if (type === "RESULT") {
+                cleanupWorker(worker);
+                resolve({ name: scriptName, data: data });
+            } else if (type === "ERROR") {
+                cleanupWorker(worker);
+                resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: error }}); 
+            }
+        };
+        worker.onerror = (err) => { cleanupWorker(worker); reject(err.message); };
+    });
+}
+
+function cleanupWorker(workerInstance) {
+    workerInstance.terminate();
+    activeWorkers = activeWorkers.filter(w => w.worker !== workerInstance);
+}
+
+function forceStopWorkers() {
+    if (activeWorkers.length === 0) return;
+    activeWorkers.forEach(w => {
+        w.worker.terminate();
+        w.resolve({ name: w.name, data: { ops: w.lastOps || 0, memory_peak_bytes: 0, duration_sec: 0, error: "USER FORCED STOP - Execution Terminated." }});
+    });
+    activeWorkers = []; 
+    logToTerminal("SYSTEM FORCED STOP. All background threads killed.", "WARN");
+    document.getElementById('forceStopBtn').classList.add('hidden');
+    updateStatus("SYSTEM IDLE", "text-emerald-300");
+    if (executionTimerInterval) clearInterval(executionTimerInterval);
+}
+
+// ==========================================
+// ANALYSIS TRIGGER BUTTONS
+// ==========================================
+async function runEditorAnalysis() {
+    const code = document.getElementById('zcodeInput').value;
+    if (!code) return logToTerminal("Editor is empty.", "WARN");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal("Starting Editor Analysis...", "INFO");
+    await executeBatch([{ name: "editor_script.py", content: code }]);
+}
+
+async function runFileAnalysis() {
+    if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
+    
+    document.getElementById('terminalBody').innerHTML = "";
+    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
+    await executeBatch(uploadedFiles);
+}
+
+// ==========================================
+// REAL-TIME BATCH EXECUTION & SANITIZATION
+// ==========================================
+async function executeBatch(scriptArray) {
+    if (activeWorkers.length > 0) forceStopWorkers();
+    if (executionTimerInterval) clearInterval(executionTimerInterval);
+
+    if (energyChart) {
+        energyChart.data.labels = Array(25).fill('');
+        energyChart.data.datasets[0].data = Array(25).fill(BASELINE_MW);
+        energyChart.update('none');
+    }
+
+    // 1. OPEN THE CINEMATIC LOADING SCREEN
+    const overlay = document.getElementById('bootOverlay');
+    const modal = document.getElementById('bootModal');
+    
+    if (overlay && modal) {
+        overlay.classList.remove('hidden');
+        setTimeout(() => {
+            overlay.classList.remove('opacity-0');
+            overlay.classList.add('opacity-100');
+            modal.classList.remove('scale-95');
+            modal.classList.add('scale-100');
+        }, 10);
+    }
+
+    updateStatus("BOOTING ENGINE...", "text-yellow-300");
+    document.getElementById('forceStopBtn').classList.remove('hidden'); 
+    
+    analysisResults = scriptArray.map(script => ({
+        name: script.name,
+        content: script.content, 
+        ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: BASELINE_MW, error: null,
+        status: 'RUNNING', 
+        history: Array(25).fill(BASELINE_MW),
+        timeLabels: Array(25).fill(''),
+        last_ops: 0, last_time: 0
+    }));
+    
+    currentDetailIndex = 0;
+    renderAnalysisTable();
+    updateCarouselUI();
+
+    logToTerminal("Initializing Instruction-Level Energy Model...", "INFO");
+    logToTerminal("Allocating WebAssembly Sandboxes...", "INFO");
+    logToTerminal("Injecting Telemetry Hooks...", "INFO");
+
+    // 2. THE GUARANTEED 1.5 SECOND CINEMATIC DELAY
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // 3. CLOSE THE CINEMATIC LOADING SCREEN
+    if (overlay && modal) {
+        overlay.classList.remove('opacity-100');
+        overlay.classList.add('opacity-0');
+        modal.classList.remove('scale-100');
+        modal.classList.add('scale-95');
+        setTimeout(() => { overlay.classList.add('hidden'); }, 300); 
+    }
+
+    updateStatus("ANALYZING...", "text-blue-400");
+    logToTerminal("Boot sequence complete. Starting execution...", "SUCCESS");
+    
+    globalStartTime = Date.now();
+    const timerEl = document.getElementById('liveTimer');
+    if (timerEl) {
+        timerEl.classList.remove('hidden');
+        executionTimerInterval = setInterval(() => {
+            timerEl.innerText = ((Date.now() - globalStartTime) / 1000).toFixed(2) + "s";
+        }, 50); 
+    }
+
+    try {
+        // 4. EXECUTE THE WEBASSEMBLY WORKERS
+        const tasks = scriptArray.map((script, index) => {
+            return runWorkerTask(script.name, script.content, (ops, mem) => {
+                const res = analysisResults[index];
+                const currentTime = (Date.now() - globalStartTime) / 1000;
+                
+                res.ops = ops;
+                res.bytes = mem;
+                activeWorkers.forEach(w => { if(w.name === script.name) w.lastOps = ops; });
+
+                updateTableRow(index, res);
+                if (currentDetailIndex === index) updateLiveUI(res, currentTime);
+            });
+        });
+
+        const results = await Promise.all(tasks);
+
+        let finalMaxDuration = 0;
+
+        for (let i = 0; i < results.length; i++) {
+            const finalRes = results[i].data;
+            const resState = analysisResults[i];
             
-            <div class="mb-8 pb-8 border-b border-gray-200">
-                <div class="w-20 h-20 bg-emerald-100 border-4 border-emerald-500 text-emerald-700 rounded-full flex items-center justify-center text-4xl font-black mx-auto mb-4 shadow-inner">
-                    <span id="profileAvatar">?</span>
+            if (finalRes.error) {
+                resState.status = 'ERROR'; 
+                resState.error = finalRes.error;
+                logToTerminal(`[${resState.name}] Error: ${finalRes.error}`, "ERR");
+                if (finalRes.error.includes("USER FORCED STOP")) {
+                    await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
+                }
+            } else {
+                resState.status = 'COMPLETED'; 
+                resState.ops = finalRes.ops || resState.ops;
+                resState.bytes = finalRes.memory_peak_bytes || resState.bytes;
+                resState.duration = finalRes.duration_sec || ((Date.now() - globalStartTime) / 1000);
+                
+                if (resState.duration > finalMaxDuration) finalMaxDuration = resState.duration;
+
+                resState.cpu_joules = resState.ops * C_CPU;
+                resState.mem_joules = resState.bytes * resState.duration * C_MEM;
+                resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
+                resState.kwh = resState.joules / 3600000;
+                resState.milliwatts = resState.duration > 0 ? (resState.joules / resState.duration) * 1000 : BASELINE_MW;
+                if(resState.milliwatts < BASELINE_MW) resState.milliwatts = BASELINE_MW;
+
+                logToTerminal(`[${resState.name}] Success: ${resState.ops} Complexity Ops`, "SUCCESS");
+                await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
+            }
+            updateTableRow(i, resState);
+        }
+        
+        clearInterval(executionTimerInterval);
+        if (timerEl && finalMaxDuration > 0) {
+            timerEl.innerText = finalMaxDuration.toFixed(2) + "s";
+        }
+
+        updateCarouselUI(); 
+
+    } catch (err) {
+        logToTerminal("Batch Execution Failed: " + err, "ERR");
+    } finally {
+        clearInterval(executionTimerInterval);
+        document.getElementById('forceStopBtn').classList.add('hidden');
+        updateStatus("SYSTEM IDLE", "text-emerald-300");
+    }
+}
+
+// ==========================================
+// UI RENDERING: TABLES & CAROUSEL
+// ==========================================
+function renderAnalysisTable() {
+    const tbody = document.getElementById('analysisTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    analysisResults.forEach((res, index) => {
+        const bgClass = index % 2 === 0 ? "bg-white" : "bg-gray-50";
+        tbody.innerHTML += `
+            <tr id="row-${index}" class="${bgClass} border-b border-gray-100 cursor-pointer hover:bg-emerald-50" onclick="jumpToDetail(${index})">
+                <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
+                <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
+                <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
+                <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${Math.ceil(res.milliwatts)} mW</td>
+                <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
+            </tr>
+        `;
+    });
+}
+
+function updateTableRow(index, res) {
+    const row = document.getElementById(`row-${index}`);
+    if (row) {
+        row.querySelector('.op-cell').innerText = `${res.ops} Ops`;
+        row.querySelector('.byte-cell').innerText = `${res.bytes} B`;
+        row.querySelector('.joule-cell').innerText = `${Math.ceil(res.milliwatts)} mW`;
+        row.querySelector('.kwh-cell').innerText = `${res.kwh.toExponential(3)} kWh`;
+    }
+}
+
+function updateLiveUI(res, currentTime) {
+    if (res.status === 'RUNNING') {
+        const deltaTime = currentTime - res.last_time;
+        if (deltaTime >= 0.1) {
+            const deltaOps = res.ops - res.last_ops;
+            let instant_mW = BASELINE_MW;
+            
+            if (deltaOps > 0) {
+                const joulesSpike = deltaOps * C_CPU;
+                const wattsSpike = joulesSpike / deltaTime;
+                instant_mW = Math.ceil(wattsSpike * 1000); 
+            }
+
+            if (instant_mW > BASELINE_MW) instant_mW = Math.ceil(instant_mW * 15);
+
+            res.last_ops = res.ops;
+            res.last_time = currentTime;
+
+            res.history.shift();
+            res.history.push(instant_mW);
+            res.timeLabels.shift();
+            res.timeLabels.push(currentTime.toFixed(1) + 's');
+
+            if (energyChart) {
+                energyChart.data.datasets[0].data = res.history;
+                energyChart.data.labels = res.timeLabels; 
+                energyChart.update('none'); 
+            }
+            
+            document.getElementById('detailMilliwatts').innerHTML = `${instant_mW} <span class="text-xl">mW</span>`;
+        }
+    } else {
+        const avg_mW = Math.ceil(res.milliwatts);
+        document.getElementById('detailMilliwatts').innerHTML = `${avg_mW} <span class="text-xl">mW</span>`;
+        if (energyChart) {
+            energyChart.data.datasets[0].data = res.history;
+            energyChart.update('none');
+        }
+    }
+    
+    let current_J = (res.cpu_joules || 0) + (res.mem_joules || 0) + C_BASE;
+    document.getElementById('detailJoules').textContent = current_J.toFixed(6) + " J";
+    
+    document.getElementById('detailOps').innerText = res.ops.toLocaleString();
+    document.getElementById('breakdownCpu').innerText = `${(res.cpu_joules || 0).toFixed(6)} J`;
+    document.getElementById('breakdownMem').innerText = `${(res.mem_joules || 0).toFixed(6)} J`;
+    document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
+
+    document.getElementById('dynCpu').textContent = (res.cpu_joules || 0).toFixed(6);
+    document.getElementById('dynMem').textContent = (res.mem_joules || 0).toFixed(6);
+    document.getElementById('dynTotal').textContent = current_J.toFixed(6);
+    document.getElementById('dynTime').textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
+    
+    const diagnostics = generateActionableDiagnostics(res);
+    const issuesFound = diagnostics ? diagnostics.count : 0;
+    const funFactsArray = diagnostics ? diagnostics.facts : [];
+
+    // --- NEW ENTERPRISE NORMALIZED MATH LOGIC ---
+    // Instead of scaling purely by 10 seconds of runtime, we scale by "Energy per Operation"
+    // Assuming an enterprise data center executes 1 Quadrillion Operations (1,000,000,000,000,000) a year.
+    const enterprise_ops_per_year = 1000000000000000;
+    let annual_joules = 0;
+
+    if (res.ops > 0) {
+        annual_joules = (current_J / res.ops) * enterprise_ops_per_year;
+    } else {
+        // Fallback if 0 ops to prevent division by zero
+        annual_joules = current_J * 3153600000; 
+    }
+
+    const annual_kwh = annual_joules / 3600000;
+
+    const smartphone_charges = Math.floor(annual_kwh / 0.015).toLocaleString();
+    const led_hours = Math.floor(annual_kwh / 0.010).toLocaleString();
+    
+    const impactCard = document.getElementById('ecoImpactCard');
+    const impactHeader = document.getElementById('ecoImpactHeader');
+    const impactText = document.getElementById('ecoImpactText');
+
+    const funFactCard = document.getElementById('funFactCard');
+    const funFactHeader = document.getElementById('funFactHeader');
+    const funFactText = document.getElementById('funFactText');
+
+    if (res.status === 'RUNNING') {
+        impactText.innerText = "Scanning telemetry to scale environmental footprint...";
+        impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+        impactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
+        impactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
+
+        funFactText.innerText = "Extracting architectural insights...";
+        funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+        funFactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
+        funFactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
+
+    } else {
+        if (issuesFound > 0) { 
+            impactText.innerHTML = `[HEAVY FOOTPRINT] Deployed at enterprise data center scale (1 Quadrillion ops/year), this unoptimized architecture would consume <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b> annually. That wasted baseline energy is equivalent to fully charging a smartphone <b>${smartphone_charges} times</b> or leaving a 10W LED bulb on for <b>${led_hours} hours</b> continuously.`;
+            impactHeader.className = "text-md font-black text-red-600 uppercase tracking-widest mb-4 text-center";
+            impactText.className = "flex-1 bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+
+            let factsHtml = `<div class="flex flex-col gap-3">`;
+            funFactsArray.forEach(f => {
+                factsHtml += `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">${f.title}</span>${f.fact}</div>`;
+            });
+            factsHtml += `</div>`;
+
+            funFactText.innerHTML = factsHtml;
+            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
+            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
+
+        } else { 
+            impactText.innerHTML = `[ECO-OPTIMIZED] By implementing structural optimization, you successfully prevented hardware burnout. At enterprise data center scale (1 Quadrillion ops/year), this refactored footprint scales highly efficiently, capping annual baseline consumption to a sustainable <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b>.`;
+            impactHeader.className = "text-md font-black text-emerald-700 uppercase tracking-widest mb-4 text-center";
+            impactText.className = "flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+
+            const goodFacts = [
+                "Using dictionary lookups is like having a VIP fast-pass at an amusement park. Instead of checking 1,000,000 items in a nested loop, the CPU jumps straight to the exact data point instantly.",
+                "Batching operations is like carrying all your groceries from the car in one giant trip. It might look silly in the code, but it saves your CPU from waking up the operating system 100 separate times.",
+                "Keeping your RAM usage low is like keeping your desk clean. When your CPU doesn't have to dig through piles of massive files to find a variable, it uses significantly less electrical power.",
+                "Async functions let your CPU take a micro-nap while waiting for a network response, completely shutting off power draw. Synchronous functions force the CPU to hold its breath and burn energy while waiting."
+            ];
+            const randomFact = goodFacts[Math.floor(Math.random() * goodFacts.length)];
+
+            funFactText.innerHTML = `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">Architecture Verified</span>${randomFact}</div>`;
+            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
+            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
+        }
+    }
+}
+
+function updateCarouselUI() {
+    if (analysisResults.length === 0) return;
+    const current = analysisResults[currentDetailIndex];
+    document.getElementById('detailFilename').innerText = current.name;
+    updateLiveUI(current, current.duration || 0);
+}
+
+function prevDetail() { if (currentDetailIndex > 0) { currentDetailIndex--; updateCarouselUI(); } }
+function nextDetail() { if (currentDetailIndex < analysisResults.length - 1) { currentDetailIndex++; updateCarouselUI(); } }
+function jumpToDetail(index) { currentDetailIndex = index; updateCarouselUI(); }
+
+// ==========================================
+// STATIC HEURISTIC DELIBERATIONS ENGINE
+// ==========================================
+function generateActionableDiagnostics(data) {
+    const suggestionEl = document.getElementById('suggestionText');
+    const cpuTrace = document.getElementById('cpuTraceContent');
+    const memTrace = document.getElementById('memTraceContent');
+
+    let htmlContent = `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnostic Deliberations: ${data.name}</h4>`;
+    
+    if (data.status === 'RUNNING') {
+        suggestionEl.innerHTML = htmlContent + `<div class="text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest">Scanning Syntax Trees...</div>`;
+        if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">Tracing Execution Map...</span>';
+        if (memTrace) memTrace.innerHTML = '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">Mapping Memory Pointers...</span>';
+        return { count: 0, facts: [] }; 
+    }
+
+    const code = data.content || ""; 
+    const lines = code.split('\n');
+    let issuesFound = 0;
+    let collectedFacts = []; 
+    
+    let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
+    let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
+
+    htmlContent += `<div class="space-y-4">`;
+
+    lines.forEach((line, index) => {
+        const trimmed = line.trim(); 
+        const lineNum = index + 1;
+        if (trimmed === "") return;
+
+        if (trimmed.startsWith("for ") || trimmed.startsWith("while ") || trimmed.startsWith("def ")) {
+            let lineOps = data.ops > 0 ? Math.floor(data.ops * 0.98) : 0;
+            if (trimmed.startsWith("def ")) lineOps = data.ops > 0 ? Math.floor(data.ops * 0.05) : 0;
+            let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
+
+            cpuHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-blue-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-blue-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-blue-500/30 truncate flex-1">${trimmed}</code>
                 </div>
-                <h2 id="profileUsername" class="text-2xl font-black text-gray-800 tracking-tight uppercase">Loading...</h2>
-                <p id="profileEmail" class="text-xs font-mono text-gray-500 mt-2 bg-gray-100 py-1 px-3 rounded-full inline-block">...</p>
-            </div>
-
-            <h3 class="text-sm font-black text-[#115e59] uppercase tracking-widest mb-2">Account Security</h3>
-            <p class="text-[10px] text-gray-500 mb-6 uppercase tracking-widest">Update your access credentials</p>
-            
-            <input type="password" id="newPassword" placeholder="Enter New Password" class="w-full mb-4 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 text-sm font-mono text-center">
-            
-            <button onclick="updateProfile()" class="w-full bg-[#115e59] hover:bg-emerald-700 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Save Changes</button>
-            
-            <p id="profileMsg" class="mt-4 text-[10px] font-bold uppercase tracking-widest"></p>
-        </div>
-    </section>
-
-    <style>
-        @keyframes fillBar {
-            0% { width: 0%; }
-            50% { width: 70%; }
-            100% { width: 100%; }
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-blue-300/80 text-[9px] font-black tracking-widest uppercase">${lineOps.toLocaleString()} Ops</span>
+                    <span class="text-blue-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
         }
-        .animate-fill-bar {
-            animation: fillBar 1.5s ease-in-out forwards;
+        
+        if (trimmed.startsWith("print(") && line.match(/^\s{4,}/)) {
+            let lineOps = data.ops > 10 ? Math.floor(data.ops * 0.02) + 1 : (data.ops > 0 ? 1 : 0); 
+            let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
+
+            cpuHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-blue-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-blue-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-blue-500/30 truncate flex-1">${trimmed}</code>
+                </div>
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-blue-300/80 text-[9px] font-black tracking-widest uppercase">${lineOps.toLocaleString()} Ops</span>
+                    <span class="text-blue-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
         }
-    </style>
 
-    <div id="bootOverlay" class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/50 backdrop-blur-md hidden opacity-0 transition-opacity duration-300">
-        <div id="bootModal" class="bg-[#0f172a]/95 border border-emerald-500/30 rounded-2xl shadow-[0_0_50px_rgba(16,185,129,0.15)] p-8 flex flex-col items-center max-w-sm w-full mx-4 transform scale-95 transition-transform duration-300 relative overflow-hidden">
+        if (trimmed.match(/\[.*for.*in.*\]/) || (trimmed.includes("=") && (trimmed.includes("[") || trimmed.includes("{"))) || trimmed.includes(".append(")) {
+            let lineBytes = data.bytes > 0 ? Math.floor(data.bytes * 0.95) : 0; 
+            let lineJoules = data.bytes > 0 ? (lineBytes / data.bytes) * data.mem_joules : 0;
+
+            memHtml += `
+            <div class="flex justify-between items-center py-2 border-b border-purple-500/20 hover:bg-purple-800/30 transition-colors">
+                <div class="flex items-center gap-2 truncate pr-2 w-3/4">
+                    <span class="text-purple-200 font-bold text-xs">Line ${lineNum}:</span>
+                    <code class="bg-[#0f172a] text-purple-100 px-1.5 py-0.5 rounded font-mono text-[10px] border border-purple-500/30 truncate flex-1">${trimmed}</code>
+                </div>
+                <div class="flex flex-col items-end w-1/4">
+                    <span class="text-purple-300/80 text-[9px] font-black tracking-widest uppercase">${lineBytes.toLocaleString()} B</span>
+                    <span class="text-purple-400 font-bold text-xs">${lineJoules.toFixed(6)} J</span>
+                </div>
+            </div>`;
+        }
+
+        // --- 2. STATIC LINTING LOGIC ---
+        Object.entries(GREEN_LINT_RULES).forEach(([key, rule]) => {
+            if (line.match(rule.pattern)) {
+                htmlContent += `
+                    <div class="bg-white border-l-4 border-orange-500 rounded-xl shadow-md mb-4 overflow-hidden">
+                        <div class="bg-orange-50 px-4 py-3 border-b border-orange-100 flex items-center gap-2">
+                            <span class="font-black text-orange-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
+                        </div>
+                        <div class="p-4">
+                            <p class="text-gray-700 text-sm mb-4 font-medium">${rule.message}</p>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-red-50/50 rounded-lg p-3 border border-red-100">
+                                    <span class="text-red-500 font-black block mb-2 uppercase tracking-widest text-[10px]">[DETECTED: HEAVY]</span>
+                                    <code class="text-red-800 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-red-50">${trimmed}</code>
+                                </div>
+                                
+                                <div class="bg-emerald-50/50 rounded-lg p-3 border border-emerald-100">
+                                    <span class="text-emerald-700 font-black block mb-2 uppercase tracking-widest text-[10px]">[REFACTOR: GREEN]</span>
+                                    <code class="text-emerald-900 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-emerald-50 whitespace-pre-wrap">${rule.action}</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                
+                if (!collectedFacts.some(f => f.title === rule.type)) {
+                    collectedFacts.push({ title: rule.type, fact: rule.fun_fact });
+                }
+                
+                issuesFound++;
+            }
+        });
+    });
+
+    cpuHtml += `</div>`; 
+    memHtml += `</div>`; 
+
+    if (issuesFound === 0) {
+        htmlContent += `<div class="text-center py-6 text-emerald-600 font-black text-sm uppercase tracking-wider">Structural Efficiency Verified</div>`;
+    }
+    
+    suggestionEl.innerHTML = htmlContent + `</div>`;
+
+    if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
+    if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
+
+    return { count: issuesFound, facts: collectedFacts };
+}
+
+// ==========================================
+// CHART INIT & SUPABASE LOGIC
+// ==========================================
+function setupChart() {
+    const ctx = document.getElementById('energyChart');
+    if (!ctx) return;
+    energyChart = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: Array(25).fill(''),
+            datasets: [{
+                label: 'Instantaneous Power (mW)',
+                data: Array(25).fill(BASELINE_MW),
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                borderWidth: 2, fill: true, tension: 0.1, pointRadius: 0
+            }]
+        },
+        options: { 
+            responsive: true, maintainAspectRatio: false, 
+            scales: { y: { beginAtZero: true, suggestedMax: 50 } }, 
+            animation: { duration: 0 } 
+        }
+    });
+}
+
+function logToTerminal(msg, type = "INFO") {
+    const terminal = document.getElementById('terminalBody');
+    if(!terminal) return;
+    const colors = { "INFO": "text-blue-400", "WARN": "text-yellow-500", "ERR": "text-red-500", "SUCCESS": "text-emerald-500" };
+    terminal.innerHTML += `<div class="mb-1"><span class="${colors[type]} font-bold">${type}:</span> <span class="text-emerald-100/90">${msg}</span></div>`;
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function updateStatus(text, colorClass) {
+    const s = document.getElementById('statusIndicator');
+    if(s) s.className = `text-[10px] ${colorClass} font-black tracking-widest uppercase`, s.innerText = text;
+}
+
+function switchTab(tabName) {
+    document.getElementById('tab-analyzer').classList.add('tab-hidden');
+    document.getElementById('tab-history').classList.add('tab-hidden');
+    document.getElementById('tab-profile').classList.add('tab-hidden');
+
+    ['analyzer', 'history', 'profile'].forEach(name => {
+        let btn = document.getElementById(`nav-${name}`);
+        if(btn) {
+            btn.classList.remove('text-emerald-300', 'border-emerald-300');
+            btn.classList.add('text-white/60', 'border-transparent');
+        }
+    });
+
+    document.getElementById(`tab-${tabName}`).classList.remove('tab-hidden');
+    let activeBtn = document.getElementById(`nav-${tabName}`);
+    if(activeBtn) {
+        activeBtn.classList.remove('text-white/60', 'border-transparent');
+        activeBtn.classList.add('text-emerald-300', 'border-emerald-300');
+    }
+
+    if (tabName === 'history') fetchAccountHistory();
+    if (tabName === 'profile') loadProfileData(); 
+}
+
+async function loadProfileData() {
+    const usernameEl = document.getElementById('profileUsername');
+    const emailEl = document.getElementById('profileEmail');
+    const avatarEl = document.getElementById('profileAvatar');
+
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) return;
+
+        emailEl.innerText = user.email;
+
+        const { data, error } = await supabaseClient
+            .from('profiles')
+            .select('username')
+            .eq('id', user.id)
+            .single();
+
+        if (data && data.username) {
+            usernameEl.innerText = data.username;
+            avatarEl.innerText = data.username.charAt(0).toUpperCase();
+        } else {
+            usernameEl.innerText = "GreenCoder";
+            avatarEl.innerText = "G";
+        }
+    } catch (e) {
+        console.error("Failed to load profile details:", e);
+    }
+}
+
+async function logoutUser() {
+    await supabaseClient.auth.signOut();
+    window.location.href = 'index.html'; 
+}
+
+// ==========================================
+// HISTORY FETCHING & SEARCHING
+// ==========================================
+async function fetchAccountHistory() {
+    const tableBody = document.getElementById('dbHistoryTableBody');
+    if(!tableBody) return;
+    tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center opacity-50 italic">Fetching from cloud...</td></tr>';
+    
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-red-500 italic font-bold">Please log in to view history.</td></tr>';
+            return;
+        }
+
+        const { data, error } = await supabaseClient
+            .from('history')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        globalHistoryData = data; 
+        renderHistoryTable(globalHistoryData);
+
+    } catch (e) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-red-500 italic font-bold">Error connecting to database.</td></tr>';
+        console.error("Supabase fetch error:", e);
+    }
+}
+
+function searchHistory() {
+    const query = document.getElementById('historySearch').value.toLowerCase();
+    if (!query) { renderHistoryTable(globalHistoryData); return; }
+    const filteredData = globalHistoryData.filter(row => {
+        const filename = row.filename ? row.filename.toLowerCase() : "script.py";
+        return filename.includes(query);
+    });
+    renderHistoryTable(filteredData);
+}
+
+function renderHistoryTable(dataToRender) {
+    const tableBody = document.getElementById('dbHistoryTableBody');
+    tableBody.innerHTML = ''; 
+    if (!dataToRender || dataToRender.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center opacity-50 italic">No execution matching search found.</td></tr>';
+        return;
+    }
+    
+    let currentGroup = ""; 
+    dataToRender.forEach(row => {
+        const dateObj = new Date(row.created_at);
+        const datePart = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const timePart = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const groupKey = `${datePart} at ${timePart}`;
+
+        if (groupKey !== currentGroup) {
+            currentGroup = groupKey;
+            const headerTr = document.createElement('tr');
+            headerTr.className = "bg-emerald-100/60 border-y border-emerald-200/80 cursor-pointer hover:bg-emerald-200/60 transition-colors select-none";
+            headerTr.innerHTML = `
+                <td colspan="6" class="py-3 px-4 text-emerald-900 font-black text-[11px] uppercase tracking-widest relative">
+                    ⏱ Computed on: <span class="text-emerald-700">${groupKey}</span>
+                    <span class="ml-2 text-emerald-600/50 text-[9px] font-bold tracking-wider">(CLICK TO SELECT ALL)</span>
+                    <input type="checkbox" class="hidden group-master-checkbox" data-group-master="${groupKey}">
+                </td>
+            `;
+            headerTr.onclick = function() {
+                const masterCb = this.querySelector('.group-master-checkbox');
+                masterCb.checked = !masterCb.checked;
+                const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+                checkboxes.forEach(cb => { if (cb.checked !== masterCb.checked) cb.closest('tr').click(); });
+            };
+            tableBody.appendChild(headerTr);
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "bg-white border-b border-gray-100 hover:bg-emerald-50 transition-all cursor-pointer select-none";
+        const displayFilename = row.filename ? row.filename : "script.py"; 
+        const preciseJoules = parseFloat(row.energy_joules);
+        const preciseKwh = parseFloat(row.energy_kwh) || (preciseJoules / 3600000);
+        
+        tr.innerHTML = `
+            <td class="py-3 px-4 text-gray-800 font-bold text-xs truncate max-w-[200px] relative">
+                <input type="checkbox" value="${row.id}" class="hidden history-checkbox" data-group="${groupKey}">
+                ${displayFilename}
+            </td>
+            <td class="py-3 px-4 font-mono text-blue-700">${row.ops} Complexity Ops</td>
+            <td class="py-3 px-4 font-mono text-purple-700">${row.peak_memory_bytes} B</td>
             
-            <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-emerald-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+            <td class="py-3 px-4 text-center font-black text-emerald-600">
+                ${row.duration_sec && row.duration_sec > 0 
+                    ? Math.ceil((preciseJoules / row.duration_sec) * 1000) 
+                    : Math.ceil((preciseJoules / 0.41) * 1000)} mW
+            </td>
+            
+            <td class="py-3 px-4 text-center font-bold text-gray-700">${preciseJoules.toFixed(6)} J</td>
+            
+            <td class="py-3 px-4 text-center font-mono text-gray-600">${preciseKwh.toExponential(3)} kWh</td>
+        `;
 
-            <div class="relative w-16 h-16 mb-6">
-                <div class="absolute inset-0 border-4 border-emerald-900/50 rounded-full"></div>
-                <div class="absolute inset-0 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
-                <div class="absolute inset-0 m-auto w-2 h-2 bg-emerald-300 rounded-full shadow-[0_0_10px_#6ee7b7] animate-pulse"></div>
-            </div>
+        tr.onclick = function() {
+            const cb = this.querySelector('.history-checkbox');
+            cb.checked = !cb.checked;
+            if (cb.checked) {
+                this.classList.remove('bg-white', 'hover:bg-emerald-50');
+                this.classList.add('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            } else {
+                this.classList.add('bg-white', 'hover:bg-emerald-50');
+                this.classList.remove('bg-blue-50', 'border-l-4', 'border-blue-500'); 
+            }
+        };
+        tableBody.appendChild(tr);
+    });
+}
 
-            <h2 class="text-emerald-400 font-black tracking-widest uppercase text-sm mb-2 text-center animate-pulse">> SYSTEM OVERRIDE</h2>
-            <p class="text-[10px] text-emerald-100/50 font-mono text-center mb-6 uppercase tracking-widest">Initializing Instruction-Level Energy Model...</p>
+function toggleSelectGroup(masterCheckbox, groupKey) {
+    const checkboxes = document.querySelectorAll(`.history-checkbox[data-group="${groupKey}"]`);
+    checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+}
 
-            <div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden relative">
-                <div class="absolute top-0 left-0 h-full bg-emerald-500 rounded-full w-0 animate-fill-bar shadow-[0_0_10px_#10b981]"></div>
-            </div>
-        </div>
-    </div>
+async function updateProfile() {
+    const newPassword = document.getElementById('newPassword').value;
+    const msgElement = document.getElementById('profileMsg');
+    
+    if(!newPassword) {
+        msgElement.innerText = "Please enter a new password.";
+        msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-red-500";
+        return;
+    }
 
-</body>
-</html>
+    try {
+        const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+        if (!error) {
+            msgElement.innerText = "Password updated securely in the cloud!";
+            msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-emerald-600";
+            document.getElementById('newPassword').value = ''; 
+        } else {
+            msgElement.innerText = error.message || "Update failed.";
+            msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-red-500";
+        }
+    } catch (e) {
+        msgElement.innerText = "Network Error.";
+        msgElement.className = "mt-4 text-[10px] font-bold uppercase tracking-widest text-red-500";
+    }
+}
+
+async function saveResultToDatabase(filename, ops, memory, joules, kwh) {
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) return;
+        await supabaseClient.from('history').insert([{ user_id: user.id, filename: filename, ops: ops, peak_memory_bytes: memory, energy_joules: joules, energy_kwh: kwh }]);
+    } catch (e) { console.error(e); }
+}
+
+function exportSelectedCSV() {
+    const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+    if (checkboxes.length === 0) return alert("Please select at least one record to export.");
+    const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+    const selectedData = globalHistoryData.filter(row => selectedIds.includes(row.id.toString()));
+    if (selectedData.length === 0) return alert("Error fetching data for export.");
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Filename,Complexity Operations,Peak Memory (Bytes),Energy (Joules),Energy (kWh),Date Computed\n"; 
+
+    selectedData.forEach(row => {
+        const dateStr = new Date(row.created_at).toLocaleString().replace(/,/g, ''); 
+        const csvRow = `${row.filename},${row.ops},${row.peak_memory_bytes},${row.energy_joules},${row.energy_kwh},${dateStr}`;
+        csvContent += csvRow + "\n";
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `GreenCode_Audit_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+async function deleteSelectedHistory() {
+    const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+    if (checkboxes.length === 0) return alert("Please select at least one record to delete.");
+
+    const confirmDelete = confirm(`Are you sure you want to permanently delete ${checkboxes.length} record(s)?`);
+    if (!confirmDelete) return;
+
+    const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+    const tableBody = document.getElementById('dbHistoryTableBody');
+    tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
+
+    try {
+        const { error } = await supabaseClient.from('history').delete().in('id', selectedIds);
+        if (error) throw error;
+        await fetchAccountHistory(); 
+    } catch (error) {
+        console.error("Error deleting records:", error);
+        await fetchAccountHistory(); 
+        alert("Failed to delete records. Check console for details.");
+    }
+}
