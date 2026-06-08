@@ -77,7 +77,10 @@
                 <div id="terminalContainer" class="w-full bg-black rounded-b-xl p-4 font-mono text-xs mb-4 overflow-y-auto" style="height: 100px;">
                     <div id="terminalBody" class="text-emerald-100/80 leading-relaxed whitespace-pre-wrap"><span class="text-emerald-500">guest:~$</span> Ready for input.</div>
                 </div>
-                <button onclick="runEditorAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+                <div class="flex gap-4">
+                    <button onclick="runEditorAnalysis(false)" class="flex-1 bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+                    <button onclick="runEditorAnalysis(true)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">30s Timed Test</button>
+                </div>            
             </section>
 
             <section class="glass-card p-6 rounded-2xl flex flex-col relative">
@@ -91,7 +94,10 @@
                     <input type="file" id="fileUpload" multiple accept=".py" class="hidden">
                     <button onclick="document.getElementById('fileUpload').click()" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg text-xs shadow">choose a file on your computer</button>
                 </div>
-                <button onclick="runFileAnalysis()" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+                <div class="flex gap-4 w-full">
+                    <button onclick="runFileAnalysis(false)" class="flex-1 bg-[#10b981] hover:bg-emerald-600 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">Run & Analyze</button>
+                    <button onclick="runFileAnalysis(true)" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 rounded-xl transition-all shadow-md uppercase tracking-widest text-sm">30s Timed Test</button>
+                </div>
             </section>
         </div>
 
@@ -146,16 +152,25 @@
                             <span class="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest px-2 py-0.5 rounded shadow-sm border border-emerald-200">HEURISTIC ESTIMATION</span>
                         </div>
 
-                        <div class="bg-[#111827] text-emerald-400 p-3 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
-                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// HEURISTIC EQUATION GUIDE</p>
-                            <p><span class="text-blue-400 font-bold">CPU Work (Joules)</span> = N_Ops × 1.5e-9</p>
-                            <p><span class="text-purple-400 font-bold">Memory Work (Joules)</span> = M_Peak_Bytes × T_Exec_Sec × 2.25e-9</p>
-                            <div class="border-t border-gray-700 mt-2 pt-2 text-gray-300 font-mono text-[9px] sm:text-[10px]">
+                        <div class="bg-[#111827] text-emerald-400 p-4 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
+                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// THERMODYNAMIC PROOF ENGINE</p>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-[9px] border-b border-gray-800 pb-2 text-gray-400">
+                                <div><span class="text-blue-400 font-bold">CPU Work (J)</span> = N_Ops × 1.5e-9</div>
+                                <div><span class="text-purple-400 font-bold">Memory Work (J)</span> = M_Bytes × Time × 2.25e-9</div>
+                            </div>
+
+                            <div class="text-gray-300 font-mono text-[9px] sm:text-[10px] space-y-1">
                                 <p>Total Energy (J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> + <span id="dynMem" class="text-purple-400 font-black">0.000000</span> + <span class="text-gray-400">0.000500</span></p>
-                                <p class="mt-1">Avg Power (mW) = ( <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> / <span id="dynTime" class="text-white font-black">0.00s</span> ) * 1000</p>
+                                <p>Avg Power (mW) = ( <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> / <span id="dynTime" class="text-white font-black">0.00s</span> ) * 1000</p>
+                                
+                                <div class="border-t border-gray-800 mt-2 pt-2 text-yellow-300">
+                                    <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider mb-1">Energy Efficiency Index (EEI)</p>
+                                    <p>Formula: EEI = Total Energy / Complexity Ops</p>
+                                    <p class="mt-1 text-white font-black">Unit Cost = <span id="dynEei" class="text-yellow-400 font-mono">0.0000e+0</span> Joules / Op</p>
+                                </div>
                             </div>
                         </div>
-                        
                         <div class="flex flex-col gap-3 text-sm font-mono text-gray-700">
                             
                             <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-blue-500 overflow-hidden">
