@@ -35,6 +35,18 @@ self.onmessage = async (event) => {
         return;
     }
 
+    try {
+        // ========================================================
+        // AUTOMATIC IMPORT PACKAGE LOADER
+        // ========================================================
+        // This scans the userCode for statements like 'import re' or 'import math'
+        // and safely pre-loads them into the WebAssembly instance before running.
+        await pyodideEngine.loadPackagesFromImports(userCode);
+    } catch (packageErr) {
+        postMessage({ type: "ERROR", error: "Package Load Failure: " + packageErr.message });
+        return;
+    }
+
     const analysisScript = `
 import sys
 import time
