@@ -190,27 +190,27 @@ function forceStopWorkers() {
 // ==========================================
 // ANALYSIS TRIGGER BUTTONS
 // ==========================================
-async function runEditorAnalysis() {
+async function runEditorAnalysis(isTimed = false) {
     const code = document.getElementById('zcodeInput').value;
     if (!code) return logToTerminal("Editor is empty.", "WARN");
     
     document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal("Starting Editor Analysis...", "INFO");
-    await executeBatch([{ name: "editor_script.py", content: code }]);
+    logToTerminal(isTimed ? "Starting 30-Second Timed Editor Analysis..." : "Starting Editor Analysis...", "INFO");
+    await executeBatch([{ name: "editor_script.py", content: code }], isTimed);
 }
 
-async function runFileAnalysis() {
+async function runFileAnalysis(isTimed = false) {
     if (uploadedFiles.length === 0) return alert("Please select or drop files first.");
     
     document.getElementById('terminalBody').innerHTML = "";
-    logToTerminal(`Starting Batch Analysis for ${uploadedFiles.length} file(s)...`, "INFO");
-    await executeBatch(uploadedFiles);
+    logToTerminal(isTimed ? "Starting 30-Second Timed Batch Analysis..." : "Starting Batch Analysis...", "INFO");
+    await executeBatch(uploadedFiles, isTimed);
 }
 
 // ==========================================
 // REAL-TIME BATCH EXECUTION & SANITIZATION
 // ==========================================
-async function executeBatch(scriptArray) {
+async function executeBatch(scriptArray, isTimed = false) {
     if (activeWorkers.length > 0) forceStopWorkers();
     if (executionTimerInterval) clearInterval(executionTimerInterval);
 
@@ -220,7 +220,6 @@ async function executeBatch(scriptArray) {
         energyChart.update('none');
     }
 
-    // 1. OPEN THE CINEMATIC LOADING SCREEN
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
     
@@ -255,10 +254,8 @@ async function executeBatch(scriptArray) {
     logToTerminal("Allocating WebAssembly Sandboxes...", "INFO");
     logToTerminal("Injecting Telemetry Hooks...", "INFO");
 
-    // 2. THE GUARANTEED 1.5 SECOND CINEMATIC DELAY
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // 3. CLOSE THE CINEMATIC LOADING SCREEN
     if (overlay && modal) {
         overlay.classList.remove('opacity-100');
         overlay.classList.add('opacity-0');
@@ -279,8 +276,21 @@ async function executeBatch(scriptArray) {
         }, 50); 
     }
 
+    // ========================================================
+    // CONDITIONAL 30-SECOND TIMER FEATURE
+    // ========================================================
+    if (isTimed) {
+        const TEST_DURATION = 30; // Set to 30 seconds
+        setTimeout(() => {
+            if (activeWorkers.length > 0) {
+                logToTerminal(`[SYSTEM] Standardized testing window (${TEST_DURATION}s) reached. Automatically stopping execution.`, "WARN");
+                forceStopWorkers();
+            }
+        }, TEST_DURATION * 1000);
+    }
+    // ========================================================
+
     try {
-        // 4. EXECUTE THE WEBASSEMBLY WORKERS
         const tasks = scriptArray.map((script, index) => {
             return runWorkerTask(script.name, script.content, (ops, mem) => {
                 const res = analysisResults[index];
@@ -306,6 +316,16 @@ async function executeBatch(scriptArray) {
             if (finalRes.error) {
                 resState.status = 'ERROR'; 
                 resState.error = finalRes.error;
+                
+                resState.duration = ((Date.now() - globalStartTime) / 1000);
+                resState.cpu_joules = resState.ops * C_CPU;
+                resState.mem_joules = resState.bytes * resState.duration * C_MEM;
+                resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
+                resState.kwh = resState.joules / 3600000;
+                
+                resState.milliwatts = resState.duration > 0 ? (resState.joules / resState.duration) * 1000 : BASELINE_MW;
+                if(resState.milliwatts < BASELINE_MW) resState.milliwatts = BASELINE_MW;
+
                 logToTerminal(`[${resState.name}] Error: ${finalRes.error}`, "ERR");
                 if (finalRes.error.includes("USER FORCED STOP")) {
                     await saveResultToDatabase(resState.name, resState.ops, resState.bytes, resState.joules, resState.kwh);
@@ -431,21 +451,24 @@ function updateLiveUI(res, currentTime) {
     document.getElementById('dynMem').textContent = (res.mem_joules || 0).toFixed(6);
     document.getElementById('dynTotal').textContent = current_J.toFixed(6);
     document.getElementById('dynTime').textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
-    
+
+    // Protected check prevents backend worker crashes during batch executions
+    const liveOps = res.ops || 0;
+    const eeiEl = document.getElementById('dynEei');
+    if (eeiEl) {
+        eeiEl.textContent = liveOps > 0 ? (current_J / liveOps).toExponential(4) : "0.0000e+0";
+    }
+
     const diagnostics = generateActionableDiagnostics(res);
     const issuesFound = diagnostics ? diagnostics.count : 0;
     const funFactsArray = diagnostics ? diagnostics.facts : [];
 
-    // --- NEW ENTERPRISE NORMALIZED MATH LOGIC ---
-    // Instead of scaling purely by 10 seconds of runtime, we scale by "Energy per Operation"
-    // Assuming an enterprise data center executes 1 Quadrillion Operations (1,000,000,000,000,000) a year.
     const enterprise_ops_per_year = 1000000000000000;
     let annual_joules = 0;
 
     if (res.ops > 0) {
         annual_joules = (current_J / res.ops) * enterprise_ops_per_year;
     } else {
-        // Fallback if 0 ops to prevent division by zero
         annual_joules = current_J * 3153600000; 
     }
 
@@ -528,10 +551,10 @@ function generateActionableDiagnostics(data) {
     const cpuTrace = document.getElementById('cpuTraceContent');
     const memTrace = document.getElementById('memTraceContent');
 
-    let htmlContent = `<h4 class="font-black text-xs text-gray-500 uppercase tracking-widest border-b border-gray-300 pb-2 mb-3">Diagnostic Deliberations: ${data.name}</h4>`;
+    let htmlContent = `<h4 class="font-black text-xs text-gray-400 uppercase tracking-widest border-b border-gray-200 pb-2 mb-4">Diagnostic Deliberations: ${data.name}</h4>`;
     
     if (data.status === 'RUNNING') {
-        suggestionEl.innerHTML = htmlContent + `<div class="text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest">Scanning Syntax Trees...</div>`;
+        suggestionEl.innerHTML = htmlContent + `<div class="text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest animate-pulse">Scanning Syntax Trees...</div>`;
         if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">Tracing Execution Map...</span>';
         if (memTrace) memTrace.innerHTML = '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">Mapping Memory Pointers...</span>';
         return { count: 0, facts: [] }; 
@@ -545,8 +568,8 @@ function generateActionableDiagnostics(data) {
     let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
     let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
 
-    htmlContent += `<div class="space-y-4">`;
-
+    // --- STEP 1: PARSE LINT RULES FIRST ---
+    let lintRulesHtml = "";
     lines.forEach((line, index) => {
         const trimmed = line.trim(); 
         const lineNum = index + 1;
@@ -556,7 +579,6 @@ function generateActionableDiagnostics(data) {
             let lineOps = data.ops > 0 ? Math.floor(data.ops * 0.98) : 0;
             if (trimmed.startsWith("def ")) lineOps = data.ops > 0 ? Math.floor(data.ops * 0.05) : 0;
             let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
-
             cpuHtml += `
             <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
                 <div class="flex items-center gap-2 truncate pr-2 w-3/4">
@@ -573,7 +595,6 @@ function generateActionableDiagnostics(data) {
         if (trimmed.startsWith("print(") && line.match(/^\s{4,}/)) {
             let lineOps = data.ops > 10 ? Math.floor(data.ops * 0.02) + 1 : (data.ops > 0 ? 1 : 0); 
             let lineJoules = data.ops > 0 ? (lineOps / data.ops) * data.cpu_joules : 0;
-
             cpuHtml += `
             <div class="flex justify-between items-center py-2 border-b border-blue-500/20 hover:bg-blue-800/30 transition-colors">
                 <div class="flex items-center gap-2 truncate pr-2 w-3/4">
@@ -590,7 +611,6 @@ function generateActionableDiagnostics(data) {
         if (trimmed.match(/\[.*for.*in.*\]/) || (trimmed.includes("=") && (trimmed.includes("[") || trimmed.includes("{"))) || trimmed.includes(".append(")) {
             let lineBytes = data.bytes > 0 ? Math.floor(data.bytes * 0.95) : 0; 
             let lineJoules = data.bytes > 0 ? (lineBytes / data.bytes) * data.mem_joules : 0;
-
             memHtml += `
             <div class="flex justify-between items-center py-2 border-b border-purple-500/20 hover:bg-purple-800/30 transition-colors">
                 <div class="flex items-center gap-2 truncate pr-2 w-3/4">
@@ -604,27 +624,17 @@ function generateActionableDiagnostics(data) {
             </div>`;
         }
 
-        // --- 2. STATIC LINTING LOGIC ---
         Object.entries(GREEN_LINT_RULES).forEach(([key, rule]) => {
             if (line.match(rule.pattern)) {
-                htmlContent += `
-                    <div class="bg-white border-l-4 border-orange-500 rounded-xl shadow-md mb-4 overflow-hidden">
-                        <div class="bg-orange-50 px-4 py-3 border-b border-orange-100 flex items-center gap-2">
-                            <span class="font-black text-orange-900 text-sm uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
+                lintRulesHtml += `
+                    <div class="bg-white border-l-4 border-red-500 rounded-xl shadow-sm mb-3 overflow-hidden border border-gray-200">
+                        <div class="bg-red-50/60 px-3 py-2 border-b border-red-100 flex items-center justify-between">
+                            <span class="font-black text-red-900 text-[10px] uppercase tracking-wider">Line ${lineNum}: ${rule.type}</span>
                         </div>
-                        <div class="p-4">
-                            <p class="text-gray-700 text-sm mb-4 font-medium">${rule.message}</p>
-                            
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div class="bg-red-50/50 rounded-lg p-3 border border-red-100">
-                                    <span class="text-red-500 font-black block mb-2 uppercase tracking-widest text-[10px]">[DETECTED: HEAVY]</span>
-                                    <code class="text-red-800 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-red-50">${trimmed}</code>
-                                </div>
-                                
-                                <div class="bg-emerald-50/50 rounded-lg p-3 border border-emerald-100">
-                                    <span class="text-emerald-700 font-black block mb-2 uppercase tracking-widest text-[10px]">[REFACTOR: GREEN]</span>
-                                    <code class="text-emerald-900 font-mono text-xs block bg-white p-2 rounded shadow-sm border border-emerald-50 whitespace-pre-wrap">${rule.action}</code>
-                                </div>
+                        <div class="p-3 text-[11px]">
+                            <p class="text-gray-600 mb-2 leading-relaxed">${rule.message}</p>
+                            <div class="bg-gray-900 rounded-lg p-2 font-mono text-[10px] text-red-400 border border-gray-800 break-all mb-1">
+                                <span class="text-gray-500 select-none">[!]</span> ${trimmed}
                             </div>
                         </div>
                     </div>`;
@@ -632,7 +642,6 @@ function generateActionableDiagnostics(data) {
                 if (!collectedFacts.some(f => f.title === rule.type)) {
                     collectedFacts.push({ title: rule.type, fact: rule.fun_fact });
                 }
-                
                 issuesFound++;
             }
         });
@@ -641,11 +650,65 @@ function generateActionableDiagnostics(data) {
     cpuHtml += `</div>`; 
     memHtml += `</div>`; 
 
+    // --- STEP 2: RENDER COMPILER LINTER STATUS AT THE VERY TOP ---
     if (issuesFound === 0) {
-        htmlContent += `<div class="text-center py-6 text-emerald-600 font-black text-sm uppercase tracking-wider">Structural Efficiency Verified</div>`;
+        htmlContent += `
+            <div class="bg-emerald-50 border border-emerald-200 rounded-xl py-3 px-4 mb-4 flex items-center gap-2 shadow-sm">
+                <span class="text-emerald-800 font-black text-xs uppercase tracking-wider">Structural Efficiency Verified</span>
+            </div>`;
+    } else {
+        htmlContent += `
+            <div class="bg-red-50 border border-red-200 rounded-xl py-3 px-4 mb-4 flex items-center gap-2 shadow-sm animate-pulse">
+                <span class="text-red-800 font-black text-xs uppercase tracking-wider">${issuesFound} Architectural Risk(s) Flagged</span>
+            </div>`;
     }
+
+    // --- STEP 3: CALCULATE THE THREE-TIER EEI STATUS CARD ---
+    let totalJoules = (data.cpu_joules || 0) + (data.mem_joules || 0) + C_BASE;
+    let opsCount = data.ops || 0;
     
-    suggestionEl.innerHTML = htmlContent + `</div>`;
+    if (opsCount > 0) {
+        let joulesPerOp = totalJoules / opsCount;
+        let microJoulesPerOp = joulesPerOp * 1000000; 
+        
+        let statusColorClass = "";
+        let statusBadgeClass = "";
+        let statusText = "";
+
+        if (issuesFound > 0) {
+            statusColorClass = "border-red-200 bg-red-50/50";
+            statusBadgeClass = "bg-red-600 text-white shadow-sm shadow-red-200";
+            statusText = "CRITICAL FOOTPRINT: Unoptimized syntax patterns are forcing processing bottlenecks. Refactoring recommended.";
+        } else if (microJoulesPerOp >= 1.0) {
+            statusColorClass = "border-amber-200 bg-amber-50/50";
+            statusBadgeClass = "bg-amber-500 text-white shadow-sm shadow-amber-200";
+            statusText = "MODERATE COMPLEXITY: Code structure is valid, but instruction payload size limits throughput efficiency.";
+        } else {
+            statusColorClass = "border-emerald-200 bg-emerald-50/50";
+            statusBadgeClass = "bg-emerald-600 text-white shadow-sm shadow-emerald-200";
+            statusText = "OPTIMIZED ARCHITECTURE: High instruction throughput velocity achieved. Structural energy overhead minimized.";
+        }
+
+        htmlContent += `
+            <div class="border ${statusColorClass} rounded-2xl p-4 mb-4 shadow-sm font-sans">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-black text-xs uppercase text-gray-700 tracking-wider">
+                        Energy Efficiency Index
+                    </span>
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-black ${statusBadgeClass}">
+                        ${microJoulesPerOp.toFixed(3)} μJ / Op
+                    </span>
+                </div>
+                <p class="text-[10px] font-bold text-gray-600 leading-relaxed uppercase tracking-wide bg-white/80 border border-gray-200/60 rounded-xl p-2.5 shadow-sm">${statusText}</p>
+            </div>
+        `;
+    }
+
+    if (issuesFound > 0) {
+        htmlContent += `<div class="space-y-3">${lintRulesHtml}</div>`;
+    }
+
+    suggestionEl.innerHTML = htmlContent;
 
     if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
     if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
@@ -673,7 +736,7 @@ function setupChart() {
         },
         options: { 
             responsive: true, maintainAspectRatio: false, 
-            scales: { y: { beginAtZero: true, suggestedMax: 50 } }, 
+            scales: { y: { beginAtZero: true } }, 
             animation: { duration: 0 } 
         }
     });
