@@ -400,6 +400,10 @@ function updateTableRow(index, res) {
 }
 
 function updateLiveUI(res, currentTime) {
+    res.cpu_joules = res.ops * C_CPU;
+    res.mem_joules = res.bytes * (currentTime || 0.01) * C_MEM;
+    let current_J = res.cpu_joules + res.mem_joules + C_BASE;
+
     if (res.status === 'RUNNING') {
         const deltaTime = currentTime - res.last_time;
         if (deltaTime >= 0.1) {
@@ -412,7 +416,9 @@ function updateLiveUI(res, currentTime) {
                 instant_mW = Math.ceil(wattsSpike * 1000); 
             }
 
-            if (instant_mW > BASELINE_MW) instant_mW = Math.ceil(instant_mW * 15);
+            if (instant_mW >= BASELINE_MW && deltaOps > 0) {
+                instant_mW = Math.ceil(instant_mW * 15);
+            }
 
             res.last_ops = res.ops;
             res.last_time = currentTime;
@@ -439,20 +445,32 @@ function updateLiveUI(res, currentTime) {
         }
     }
     
-    let current_J = (res.cpu_joules || 0) + (res.mem_joules || 0) + C_BASE;
-    document.getElementById('detailJoules').textContent = current_J.toFixed(6) + " J";
+    // ====================================================================
+    // DYNAMIC UI UPDATER
+    // ====================================================================
+    const detailJoulesEl = document.getElementById('detailJoules');
+    const detailOpsEl = document.getElementById('detailOps');
+    const brCpuEl = document.getElementById('breakdownCpu');
+    const brMemEl = document.getElementById('breakdownMem');
+    const brBaseEl = document.getElementById('breakdownBase');
+
+    const dynCpuEl = document.getElementById('dynCpu');
+    const dynMemEl = document.getElementById('dynMem');
+    const dynTotalEl = document.getElementById('dynTotal');
+    const dynTimeEl = document.getElementById('dynTime');
+
+    if (detailJoulesEl) detailJoulesEl.textContent = current_J.toFixed(6) + " J";
+    if (detailOpsEl) detailOpsEl.innerText = res.ops.toLocaleString();
     
-    document.getElementById('detailOps').innerText = res.ops.toLocaleString();
-    document.getElementById('breakdownCpu').innerText = `${(res.cpu_joules || 0).toFixed(6)} J`;
-    document.getElementById('breakdownMem').innerText = `${(res.mem_joules || 0).toFixed(6)} J`;
-    document.getElementById('breakdownBase').innerText = `${C_BASE.toFixed(6)} J`;
+    if (brCpuEl) brCpuEl.innerText = `${res.cpu_joules.toFixed(6)} J`;
+    if (brMemEl) brMemEl.innerText = `${res.mem_joules.toFixed(6)} J`;
+    if (brBaseEl) brBaseEl.innerText = `${C_BASE.toFixed(6)} J`;
 
-    document.getElementById('dynCpu').textContent = (res.cpu_joules || 0).toFixed(6);
-    document.getElementById('dynMem').textContent = (res.mem_joules || 0).toFixed(6);
-    document.getElementById('dynTotal').textContent = current_J.toFixed(6);
-    document.getElementById('dynTime').textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
+    if (dynCpuEl) dynCpuEl.textContent = res.cpu_joules.toFixed(6);
+    if (dynMemEl) dynMemEl.textContent = res.mem_joules.toFixed(6);
+    if (dynTotalEl) dynTotalEl.textContent = current_J.toFixed(6);
+    if (dynTimeEl) dynTimeEl.textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
 
-    // Protected check prevents backend worker crashes during batch executions
     const liveOps = res.ops || 0;
     const eeiEl = document.getElementById('dynEei');
     if (eeiEl) {
@@ -473,7 +491,6 @@ function updateLiveUI(res, currentTime) {
     }
 
     const annual_kwh = annual_joules / 3600000;
-
     const smartphone_charges = Math.floor(annual_kwh / 0.015).toLocaleString();
     const led_hours = Math.floor(annual_kwh / 0.010).toLocaleString();
     
@@ -486,48 +503,62 @@ function updateLiveUI(res, currentTime) {
     const funFactText = document.getElementById('funFactText');
 
     if (res.status === 'RUNNING') {
-        impactText.innerText = "Scanning telemetry to scale environmental footprint...";
-        impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
-        impactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
-        impactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
-
-        funFactText.innerText = "Extracting architectural insights...";
-        funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
-        funFactHeader.className = "text-md font-black text-gray-500 uppercase tracking-widest mb-4 text-center";
-        funFactText.className = "flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed";
-
+        if (impactText && impactCard && impactHeader) {
+            impactText.innerHTML = `[STREAMING] Live processing telemetry tracking... Current run: <b>${current_J.toFixed(4)} Joules</b>.`;
+            // Removed opacity/transparency. Uses a crisp glass card background.
+            impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+            impactHeader.className = "text-md font-black text-blue-600 uppercase tracking-widest mb-4 text-center";
+            impactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+        }
+        
+        // Ensure the fun fact card matches the layout during the live stream
+        if (funFactText && funFactCard && funFactHeader) {
+            funFactText.innerHTML = `[STREAMING] Analyzing structural execution patterns...`;
+            funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+            funFactHeader.className = "text-md font-black text-blue-600 uppercase tracking-widest mb-4 text-center";
+            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+        }
     } else {
-        if (issuesFound > 0) { 
-            impactText.innerHTML = `[HEAVY FOOTPRINT] Deployed at enterprise data center scale (1 Quadrillion ops/year), this unoptimized architecture would consume <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b> annually. That wasted baseline energy is equivalent to fully charging a smartphone <b>${smartphone_charges} times</b> or leaving a 10W LED bulb on for <b>${led_hours} hours</b> continuously.`;
-            impactHeader.className = "text-md font-black text-red-600 uppercase tracking-widest mb-4 text-center";
-            impactText.className = "flex-1 bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+        if (impactCard && impactHeader && impactText) {
+            if (issuesFound > 0) { 
+                impactText.innerHTML = `[HEAVY FOOTPRINT] Deployed at enterprise data center scale (1 Quadrillion ops/year), this unoptimized architecture would consume <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b> annually. That wasted baseline energy is equivalent to fully charging a smartphone <b>${smartphone_charges} times</b> or leaving a 10W LED bulb on for <b>${led_hours} hours</b> continuously.`;
+                impactHeader.className = "text-md font-black text-red-600 uppercase tracking-widest mb-4 text-center";
+                impactText.className = "flex-1 bg-red-50 border border-red-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+                impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
 
-            let factsHtml = `<div class="flex flex-col gap-3">`;
-            funFactsArray.forEach(f => {
-                factsHtml += `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">${f.title}</span>${f.fact}</div>`;
-            });
-            factsHtml += `</div>`;
+                let factsHtml = `<div class="flex flex-col gap-3">`;
+                funFactsArray.forEach(f => {
+                    factsHtml += `<div class="bg-white/70 p-3 rounded-lg border border-red-100 text-sm text-red-900 shadow-sm leading-relaxed"><span class="font-black text-red-700 block mb-1">${f.title}</span>${f.fact}</div>`;
+                });
+                factsHtml += `</div>`;
 
-            funFactText.innerHTML = factsHtml;
-            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
-            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
+                if (funFactText && funFactHeader && funFactCard) {
+                    funFactText.innerHTML = factsHtml;
+                    funFactHeader.className = "text-md font-black text-red-700 uppercase tracking-widest mb-4 text-center";
+                    funFactText.className = "flex-1 bg-red-50 border border-red-200 rounded-xl p-4 shadow-inner";
+                    funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+                }
+            } else { 
+                impactText.innerHTML = `[ECO-OPTIMIZED] By implementing structural optimization, you successfully prevented hardware burnout. At enterprise data center scale (1 Quadrillion ops/year), this refactored footprint scales highly efficiently, capping annual baseline consumption to a sustainable <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b>.`;
+                impactHeader.className = "text-md font-black text-emerald-700 uppercase tracking-widest mb-4 text-center";
+                impactText.className = "flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+                impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
 
-        } else { 
-            impactText.innerHTML = `[ECO-OPTIMIZED] By implementing structural optimization, you successfully prevented hardware burnout. At enterprise data center scale (1 Quadrillion ops/year), this refactored footprint scales highly efficiently, capping annual baseline consumption to a sustainable <b>${annual_kwh.toLocaleString(undefined, {maximumFractionDigits: 2})} kWh</b>.`;
-            impactHeader.className = "text-md font-black text-emerald-700 uppercase tracking-widest mb-4 text-center";
-            impactText.className = "flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
+                const goodFacts = [
+                    "Using dictionary lookups is like having a VIP fast-pass at an amusement park. Instead of checking 1,000,000 items in a nested loop, the CPU jumps straight to the exact data point instantly.",
+                    "Batching operations is like carrying all your groceries from the car in one giant trip. It might look silly in the code, but it saves your CPU from waking up the operating system 100 separate times.",
+                    "Keeping your RAM usage low is like keeping your desk clean. When your CPU doesn't have to dig through piles of massive files to find a variable, it uses significantly less electrical power.",
+                    "Async functions let your CPU take a micro-nap while waiting for a network response, completely shutting off power draw. Synchronous functions force the CPU to hold its breath and burn energy while waiting."
+                ];
+                const randomFact = goodFacts[Math.floor(Math.random() * goodFacts.length)];
 
-            const goodFacts = [
-                "Using dictionary lookups is like having a VIP fast-pass at an amusement park. Instead of checking 1,000,000 items in a nested loop, the CPU jumps straight to the exact data point instantly.",
-                "Batching operations is like carrying all your groceries from the car in one giant trip. It might look silly in the code, but it saves your CPU from waking up the operating system 100 separate times.",
-                "Keeping your RAM usage low is like keeping your desk clean. When your CPU doesn't have to dig through piles of massive files to find a variable, it uses significantly less electrical power.",
-                "Async functions let your CPU take a micro-nap while waiting for a network response, completely shutting off power draw. Synchronous functions force the CPU to hold its breath and burn energy while waiting."
-            ];
-            const randomFact = goodFacts[Math.floor(Math.random() * goodFacts.length)];
-
-            funFactText.innerHTML = `<div class="bg-white/70 p-3 rounded-lg border border-blue-100 text-sm text-blue-900 shadow-sm leading-relaxed"><span class="font-black text-blue-700 block mb-1">Architecture Verified</span>${randomFact}</div>`;
-            funFactHeader.className = "text-md font-black text-blue-700 uppercase tracking-widest mb-4 text-center";
-            funFactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-inner";
+                if (funFactText && funFactHeader && funFactCard) {
+                    funFactText.innerHTML = `<div class="bg-white/70 p-3 rounded-lg border border-emerald-100 text-sm text-emerald-900 shadow-sm leading-relaxed"><span class="font-black text-emerald-700 block mb-1">Architecture Verified</span>${randomFact}</div>`;
+                    funFactHeader.className = "text-md font-black text-emerald-700 uppercase tracking-widest mb-4 text-center";
+                    funFactText.className = "flex-1 bg-emerald-50 border border-emerald-200 rounded-xl p-4 shadow-inner";
+                    funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
+                }
+            }
         }
     }
 }
