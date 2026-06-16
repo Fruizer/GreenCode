@@ -30,6 +30,12 @@
             <button id="btn-login" onclick="logIn()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all shadow-md">
                 Enter Dashboard
             </button>
+            
+            <!-- NEW: GUEST TESTER BUTTON FOR EXPERTS -->
+            <button id="btn-guest" onclick="guestLogin()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-all border border-gray-200 flex items-center justify-center gap-2">
+                👤 Continue as Guest Tester
+            </button>
+
             <button id="btn-signup" onclick="signUp()" class="hidden w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all shadow-md">
                 Register Account
             </button>
@@ -39,6 +45,7 @@
         </div>
 
         <p id="msg" class="mt-6 text-[10px] font-black uppercase tracking-widest"></p>
+        <p class="mt-2 text-[8px] text-gray-400 uppercase tracking-tighter">Privacy Focused: Guests are logged into a public test account.</p>
     </div>
 
 <script>
@@ -60,6 +67,7 @@
         identifierInput.placeholder = isLogin ? "Username or Email" : "Email Address";
         
         document.getElementById('btn-login').classList.toggle('hidden', !isLogin);
+        document.getElementById('btn-guest').classList.toggle('hidden', !isLogin); // Hide guest button on signup tab
         document.getElementById('btn-signup').classList.toggle('hidden', isLogin);
     }
 
@@ -68,47 +76,45 @@
         msgEl.className = `mt-6 text-[10px] font-black uppercase tracking-widest ${isError ? 'text-red-500' : 'text-emerald-600'}`;
     }
 
+    async function guestLogin() {
+        showMessage("Booting guest session...", false);
+        // Ensure you have created this account in your Supabase Auth dashboard first!
+        const { error } = await supabaseClient.auth.signInWithPassword({
+            email: 'tester@greencode.com',
+            password: 'ExpertTester123!' 
+        });
+
+        if (error) showMessage("Guest access unavailable: " + error.message, true);
+        else window.location.href = 'main.html';
+    }
+
     async function signUp() {
-    const username = usernameInput.value; // Used as a display name
-    const email = identifierInput.value; // Now strictly used as email
-    const password = passwordInput.value;
+        const username = usernameInput.value;
+        const email = identifierInput.value;
+        const password = passwordInput.value;
+        showMessage("Creating account...", false);
 
-    showMessage("Creating account...", false);
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) return showMessage(error.message, true);
 
-    // 1. Create the Auth User
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-    });
+        const { error: profileError } = await supabaseClient
+            .from('profiles')
+            .insert([{ id: data.user.id, username: username, email: email }]);
 
-    if (error) return showMessage(error.message, true);
+        if (profileError) console.error("Profile error:", profileError);
+        window.location.href = 'main.html'; // Changed to main.html
+    }
 
-    // 2. Save the Display Name to Profiles
-    const { error: profileError } = await supabaseClient
-        .from('profiles')
-        .insert([{ id: data.user.id, username: username, email: email }]);
+    async function logIn() {
+        const email = identifierInput.value;
+        const password = passwordInput.value;
+        showMessage("Authenticating...", false);
 
-    if (profileError) console.error("Profile error:", profileError);
-    
-    // Redirect instantly since Confirm Email is OFF
-    window.location.href = 'index.html';
-}
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-async function logIn() {
-    const email = identifierInput.value;
-    const password = passwordInput.value;
-
-    showMessage("Authenticating...", false);
-
-    // Simple Email Login
-    const { error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password,
-    });
-
-    if (error) showMessage(error.message, true);
-    else window.location.href = 'index.html';
-}
+        if (error) showMessage(error.message, true);
+        else window.location.href = 'main.html'; // Changed to main.html
+    }
 
     async function resetPassword() {
         if (!identifierInput.value) return showMessage("Input email first.", true);
