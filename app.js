@@ -63,6 +63,27 @@ const GREEN_LINT_RULES = {
         message: "Loading entire file objects into memory forces garbage collection and swap-file usage.",
         action: "for line in file:  # Use a generator/iterator for lazy loading",
         fun_fact: "Loading a giant file into RAM all at once is like trying to swallow a watermelon whole. Reading it line-by-line allows the hardware to process the data without overflowing the memory banks."
+    },
+    "string_concat": {
+        pattern: /[\w]+\s*\+=\s*[\w]+/,
+        type: "String Accumulation Leak",
+        message: "Using += in loops creates new string objects in memory every iteration.",
+        action: "Use ''.join(list_of_strings) to minimize reallocations.",
+        fun_fact: "String concatenation with += is O(n^2) because Python copies the entire string for every append."
+    },
+    "membership_lookup": {
+        pattern: /if\s+[\w]+\s+in\s+[\w]+_list:/,
+        type: "Linear Membership Lookup",
+        message: "Checking membership in a list is O(n).",
+        action: "Convert the list to a set() first for O(1) lookup speed.",
+        fun_fact: "List lookups are like searching a bookshelf book-by-book. Sets are like a library index card system."
+    },
+    "comprehension": {
+        pattern: /\[.+for\s+.+in\s+.+\]|\{.+for\s+.+in\s+.+\}/,
+        type: "Comprehension Structural Density",
+        message: "List/Dict comprehensions consume high instantaneous memory.",
+        action: "Use (x for x in items) to create a memory-efficient generator.",
+        fun_fact: "List comprehensions create the whole object in RAM. Generators stream it like a movie."
     }
 };
 
@@ -77,6 +98,7 @@ window.onload = function() {
 function setupDragAndDrop() {
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileUpload');
+    const folderInput = document.getElementById('folderUpload'); 
     if (!dropzone || !fileInput) return;
 
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); });
@@ -87,14 +109,38 @@ function setupDragAndDrop() {
         handleFiles(e.dataTransfer.files);
     });
     fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+    
+    if (folderInput) {
+        folderInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+    }
 }
 
 async function handleFiles(files) {
     uploadedFiles = []; 
+    const entryPointSelect = document.getElementById('entryPointSelect'); 
+    const entryPointContainer = document.getElementById('entryPointContainer'); 
+    
+    if (entryPointSelect) entryPointSelect.innerHTML = ''; 
+
+    let isFolderUpload = false; 
+
     for (let file of files) {
-        if (file.name.endsWith('.py')) {
+        const path = file.webkitRelativePath || file.name; 
+        
+        if (path.includes('/')) {
+            isFolderUpload = true;
+        }
+
+        if (path.endsWith('.py')) {
             const text = await file.text();
-            uploadedFiles.push({ name: file.name, content: text });
+            uploadedFiles.push({ name: path, content: text });
+            
+            if (entryPointSelect) {
+                const option = document.createElement('option');
+                option.value = path;
+                option.text = path;
+                entryPointSelect.appendChild(option);
+            }
         }
     }
     
@@ -107,9 +153,17 @@ async function handleFiles(files) {
         uploadedFiles.forEach(file => {
             previewList.innerHTML += `
                 <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full border border-emerald-200 truncate max-w-[140px] shadow-sm flex items-center gap-1" title="${file.name}">
-                    [FILE] ${file.name}
+                    [FILE] ${file.name.split('/').pop()}
                 </span>`;
         });
+    }
+
+    if (uploadedFiles.length > 1 && isFolderUpload && entryPointContainer) {
+        entryPointContainer.classList.remove('hidden');
+        const smartGuess = uploadedFiles.find(f => f.name.includes('main.py') || f.name.includes('app.py'));
+        if (smartGuess) entryPointSelect.value = smartGuess.name;
+    } else if (entryPointContainer) {
+        entryPointContainer.classList.add('hidden');
     }
 
     logToTerminal(`Loaded ${uploadedFiles.length} file(s) into memory.`, "INFO");
@@ -120,53 +174,33 @@ async function handleFiles(files) {
 // ==========================================
 function instrumentPythonCodeJS(rawCode) {
     const lines = rawCode.split('\n');
-    let instrumentedCode = ['__tracker = {"ops": 0, "current_mem": 0, "peak_mem": 0, "last_sync": 0}'];
+    let instrumentedCode = []; 
     
+    const weights = { "print": 50, "open": 100, "for": 2, "while": 2, "def": 1, "class": 2, "default": 1 };
+
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
-        if (line.match(/=\s*\[(.*?)\]/)) line = line.replace(/=\s*\[(.*?)\]/g, "= GreenList([$1])");
+
+        // LEXICAL MEMORY ENFORCEMENT INTERCEPTOR (AST BYPASS)
+        if (line.match(/=\s*\[\s*\]/)) {
+            line = line.replace(/=\s*\[\s*\]/, "= GreenList()");
+        } else if (line.match(/=\s*list\((.*)\)/)) {
+            line = line.replace(/=\s*list\((.*)\)/, "= GreenList($1)");
+        }
+        
         instrumentedCode.push(line);
         
-        if (line.match(/^\s*(for|while|def)\b.*:/)) {
-            let nextLineIndent = "    "; 
-            for (let j = i + 1; j < lines.length; j++) {
-                if (lines[j].trim() !== "") {
-                    let match = lines[j].match(/^(\s+)/);
-                    if (match) nextLineIndent = match[1];
-                    else nextLineIndent = line.match(/^(\s*)/)[1] + "    ";
-                    break;
-                }
-            }
-            instrumentedCode.push(nextLineIndent + "__tracker['ops'] += 1");
-            instrumentedCode.push(nextLineIndent + "_check_telemetry()"); 
+        let weight = weights.default;
+        if (line.match(/print\(/)) weight = weights.print;
+        if (line.match(/for |while /)) weight = weights.for;
+        
+        if (line.match(/^\s*(for|while|def|class)\b.*:/)) {
+            let indent = line.match(/^(\s*)/)[1] + "    ";
+            instrumentedCode.push(indent + `_green_tracker['ops'] += ${weight}`);
+            instrumentedCode.push(indent + "_check_telemetry()"); 
         }
     }
     return instrumentedCode.join('\n');
-}
-
-function runWorkerTask(scriptName, rawCode, onTelemetry) {
-    return new Promise((resolve, reject) => {
-        const worker = new Worker('worker.js?v=' + Date.now());
-        activeWorkers.push({ worker: worker, name: scriptName, resolve: resolve, reject: reject }); 
-
-        const instrumented = instrumentPythonCodeJS(rawCode);
-
-        worker.onmessage = function(e) {
-            const { type, data, error, ops, mem } = e.data;
-            if (type === "TELEMETRY") {
-                if (onTelemetry) onTelemetry(ops, mem); 
-            } else if (type === "READY") {
-                worker.postMessage({ userCode: instrumented });
-            } else if (type === "RESULT") {
-                cleanupWorker(worker);
-                resolve({ name: scriptName, data: data });
-            } else if (type === "ERROR") {
-                cleanupWorker(worker);
-                resolve({ name: scriptName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: error }}); 
-            }
-        };
-        worker.onerror = (err) => { cleanupWorker(worker); reject(err.message); };
-    });
 }
 
 function cleanupWorker(workerInstance) {
@@ -222,7 +256,6 @@ async function executeBatch(scriptArray, isTimed = false) {
 
     const overlay = document.getElementById('bootOverlay');
     const modal = document.getElementById('bootModal');
-    
     if (overlay && modal) {
         overlay.classList.remove('hidden');
         setTimeout(() => {
@@ -236,23 +269,44 @@ async function executeBatch(scriptArray, isTimed = false) {
     updateStatus("BOOTING ENGINE...", "text-yellow-300");
     document.getElementById('forceStopBtn').classList.remove('hidden'); 
     
-    analysisResults = scriptArray.map(script => ({
-        name: script.name,
-        content: script.content, 
+    const entryPointContainer = document.getElementById('entryPointContainer');
+    const isProjectMode = uploadedFiles.length > 1 && entryPointContainer && !entryPointContainer.classList.contains('hidden');
+    
+    let executionPlan = [];
+    
+    if (isProjectMode) {
+        const targetMain = document.getElementById('entryPointSelect').value;
+        const projectFiles = uploadedFiles.map(f => ({ name: f.name, content: instrumentPythonCodeJS(f.content) }));
+        
+        executionPlan.push({
+            displayName: "SYSTEM ROOT: " + targetMain,
+            targetMain: targetMain,
+            filesToPass: projectFiles,
+            originalContent: uploadedFiles.find(f => f.name === targetMain)?.content || ""
+        });
+        logToTerminal(`Project Mode Detected. Unifying ${projectFiles.length} files into single VFS execution...`, "INFO");
+    } else {
+        executionPlan = scriptArray.map(script => ({
+            displayName: script.name,
+            targetMain: script.name,
+            filesToPass: [{ name: script.name, content: instrumentPythonCodeJS(script.content) }],
+            originalContent: script.content
+        }));
+    }
+
+    analysisResults = executionPlan.map(plan => ({
+        name: plan.displayName,
+        content: plan.originalContent, 
         ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: BASELINE_MW, error: null,
         status: 'RUNNING', 
         history: Array(25).fill(BASELINE_MW),
         timeLabels: Array(25).fill(''),
         last_ops: 0, last_time: 0
     }));
-    
+
     currentDetailIndex = 0;
     renderAnalysisTable();
     updateCarouselUI();
-
-    logToTerminal("Initializing Instruction-Level Energy Model...", "INFO");
-    logToTerminal("Allocating WebAssembly Sandboxes...", "INFO");
-    logToTerminal("Injecting Telemetry Hooks...", "INFO");
 
     await new Promise(resolve => setTimeout(resolve, 1500));
 
@@ -276,11 +330,8 @@ async function executeBatch(scriptArray, isTimed = false) {
         }, 50); 
     }
 
-    // ========================================================
-    // CONDITIONAL 30-SECOND TIMER FEATURE
-    // ========================================================
     if (isTimed) {
-        const TEST_DURATION = 30; // Set to 30 seconds
+        const TEST_DURATION = 30; 
         setTimeout(() => {
             if (activeWorkers.length > 0) {
                 logToTerminal(`[SYSTEM] Standardized testing window (${TEST_DURATION}s) reached. Automatically stopping execution.`, "WARN");
@@ -288,20 +339,34 @@ async function executeBatch(scriptArray, isTimed = false) {
             }
         }, TEST_DURATION * 1000);
     }
-    // ========================================================
 
     try {
-        const tasks = scriptArray.map((script, index) => {
-            return runWorkerTask(script.name, script.content, (ops, mem) => {
-                const res = analysisResults[index];
-                const currentTime = (Date.now() - globalStartTime) / 1000;
-                
-                res.ops = ops;
-                res.bytes = mem;
-                activeWorkers.forEach(w => { if(w.name === script.name) w.lastOps = ops; });
+        const tasks = executionPlan.map((plan, index) => {
+            return new Promise((resolve, reject) => {
+                const worker = new Worker('worker.js?v=' + Date.now());
+                activeWorkers.push({ worker: worker, name: plan.displayName, resolve: resolve, reject: reject }); 
 
-                updateTableRow(index, res);
-                if (currentDetailIndex === index) updateLiveUI(res, currentTime);
+                worker.onmessage = function(e) {
+                    const { type, data, error, ops, mem } = e.data;
+                    if (type === "TELEMETRY") {
+                        const res = analysisResults[index];
+                        const currentTime = (Date.now() - globalStartTime) / 1000;
+                        res.ops = ops;
+                        res.bytes = mem;
+                        activeWorkers.forEach(w => { if(w.name === plan.displayName) w.lastOps = ops; });
+                        updateTableRow(index, res);
+                        if (currentDetailIndex === index) updateLiveUI(res, currentTime);
+                    } else if (type === "READY") {
+                        worker.postMessage({ projectFiles: plan.filesToPass, mainFileName: plan.targetMain });
+                    } else if (type === "RESULT") {
+                        cleanupWorker(worker);
+                        resolve({ name: plan.displayName, data: data });
+                    } else if (type === "ERROR") {
+                        cleanupWorker(worker);
+                        resolve({ name: plan.displayName, data: { ops: 0, memory_peak_bytes: 0, duration_sec: 0, error: error }}); 
+                    }
+                };
+                worker.onerror = (err) => { cleanupWorker(worker); reject(err.message); };
             });
         });
 
@@ -316,13 +381,11 @@ async function executeBatch(scriptArray, isTimed = false) {
             if (finalRes.error) {
                 resState.status = 'ERROR'; 
                 resState.error = finalRes.error;
-                
                 resState.duration = ((Date.now() - globalStartTime) / 1000);
                 resState.cpu_joules = resState.ops * C_CPU;
                 resState.mem_joules = resState.bytes * resState.duration * C_MEM;
                 resState.joules = resState.cpu_joules + resState.mem_joules + C_BASE;
                 resState.kwh = resState.joules / 3600000;
-                
                 resState.milliwatts = resState.duration > 0 ? (resState.joules / resState.duration) * 1000 : BASELINE_MW;
                 if(resState.milliwatts < BASELINE_MW) resState.milliwatts = BASELINE_MW;
 
@@ -359,7 +422,7 @@ async function executeBatch(scriptArray, isTimed = false) {
         updateCarouselUI(); 
 
     } catch (err) {
-        logToTerminal("Batch Execution Failed: " + err, "ERR");
+        logToTerminal("Execution Failed: " + err, "ERR");
     } finally {
         clearInterval(executionTimerInterval);
         document.getElementById('forceStopBtn').classList.add('hidden');
@@ -402,7 +465,10 @@ function updateTableRow(index, res) {
 function updateLiveUI(res, currentTime) {
     res.cpu_joules = res.ops * C_CPU;
     res.mem_joules = res.bytes * (currentTime || 0.01) * C_MEM;
-    let current_J = res.cpu_joules + res.mem_joules + C_BASE;
+    
+    // TIME-VARIANT LOGARITHMIC BASE SCALING 
+    const execution_duration = currentTime || 0.01;
+    let current_J = res.cpu_joules + res.mem_joules + (C_BASE * (1 + Math.log1p(execution_duration)));
 
     if (res.status === 'RUNNING') {
         const deltaTime = currentTime - res.last_time;
@@ -474,7 +540,7 @@ function updateLiveUI(res, currentTime) {
     const liveOps = res.ops || 0;
     const eeiEl = document.getElementById('dynEei');
     if (eeiEl) {
-        eeiEl.textContent = liveOps > 0 ? (current_J / liveOps).toExponential(4) : "0.0000e+0";
+        eeiEl.textContent = liveOps > 0 ? ((current_J / liveOps) * 1000000).toFixed(4) + " μJ / Op" : "0.0000 μJ / Op";
     }
 
     const diagnostics = generateActionableDiagnostics(res);
@@ -505,13 +571,11 @@ function updateLiveUI(res, currentTime) {
     if (res.status === 'RUNNING') {
         if (impactText && impactCard && impactHeader) {
             impactText.innerHTML = `[STREAMING] Live processing telemetry tracking... Current run: <b>${current_J.toFixed(4)} Joules</b>.`;
-            // Removed opacity/transparency. Uses a crisp glass card background.
             impactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
             impactHeader.className = "text-md font-black text-blue-600 uppercase tracking-widest mb-4 text-center";
             impactText.className = "flex-1 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm font-bold text-gray-700 leading-relaxed shadow-inner";
         }
         
-        // Ensure the fun fact card matches the layout during the live stream
         if (funFactText && funFactCard && funFactHeader) {
             funFactText.innerHTML = `[STREAMING] Analyzing structural execution patterns...`;
             funFactCard.className = "glass-card p-6 rounded-2xl flex flex-col transition-colors";
@@ -584,6 +648,21 @@ function generateActionableDiagnostics(data) {
 
     let htmlContent = `<h4 class="font-black text-xs text-gray-400 uppercase tracking-widest border-b border-gray-200 pb-2 mb-4">Diagnostic Deliberations: ${data.name}</h4>`;
     
+    // COMPLEXITY DOCTOR LOGIC
+    let complexityStatus = "";
+    let complexityAdvice = "";
+
+    if (data.ops > 1000000) {
+        complexityStatus = "CRITICAL INSTRUCTION LOAD";
+        complexityAdvice = "Your code is executing over 1 Million operations. This usually indicates an O(n²) nested loop or an unbounded recursive call. Even if the energy is low, this 'Instruction Bloat' prevents your software from scaling to larger datasets.";
+    } else if (data.ops > 100000) {
+        complexityStatus = "MODERATE INSTRUCTION LOAD";
+        complexityAdvice = "Your operation count is rising. Check if you are performing lookups inside a list (O(n)). Converting that list to a Set or Dictionary would drop these Ops to near-zero.";
+    } else {
+        complexityStatus = "OPTIMIZED INSTRUCTION LOAD";
+        complexityAdvice = "High-efficiency detected. Your algorithm is using the minimum number of hardware instructions required for this workload.";
+    }
+
     if (data.status === 'RUNNING') {
         suggestionEl.innerHTML = htmlContent + `<div class="text-[#115e59] font-black text-center mt-4 text-sm uppercase tracking-widest animate-pulse">Scanning Syntax Trees...</div>`;
         if (cpuTrace) cpuTrace.innerHTML = '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">Tracing Execution Map...</span>';
@@ -598,6 +677,19 @@ function generateActionableDiagnostics(data) {
     
     let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
     let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
+
+    // COMPLEXITY UI INJECTION
+    htmlContent += `
+        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 shadow-sm">
+            <h5 class="text-blue-800 font-black text-[10px] uppercase tracking-widest mb-2">Complexity Diagnosis: ${complexityStatus}</h5>
+            <p class="text-[11px] text-gray-700 leading-relaxed font-bold">
+                ${complexityAdvice}
+            </p>
+            <div class="mt-3 bg-white/50 p-2 rounded-lg border border-blue-100 italic text-[10px] text-blue-900">
+                💡 <b>Insight:</b> ${data.ops.toLocaleString()} Ops isn't just a number; it represents the exact times the CPU fetched an instruction. By refactoring to O(1), you allow the CPU to stay in a low-power state longer.
+            </div>
+        </div>
+    `;
 
     // --- STEP 1: PARSE LINT RULES FIRST ---
     let lintRulesHtml = "";
@@ -695,7 +787,8 @@ function generateActionableDiagnostics(data) {
     }
 
     // --- STEP 3: CALCULATE THE THREE-TIER EEI STATUS CARD ---
-    let totalJoules = (data.cpu_joules || 0) + (data.mem_joules || 0) + C_BASE;
+    const execution_duration = data.duration || 0.01;
+    let totalJoules = (data.cpu_joules || 0) + (data.mem_joules || 0) + (C_BASE * (1 + Math.log1p(execution_duration)));
     let opsCount = data.ops || 0;
     
     if (opsCount > 0) {
@@ -727,7 +820,7 @@ function generateActionableDiagnostics(data) {
                         Energy Efficiency Index
                     </span>
                     <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-black ${statusBadgeClass}">
-                        ${microJoulesPerOp.toFixed(3)} μJ / Op
+                        ${microJoulesPerOp.toFixed(4)} μJ / Op
                     </span>
                 </div>
                 <p class="text-[10px] font-bold text-gray-600 leading-relaxed uppercase tracking-wide bg-white/80 border border-gray-200/60 rounded-xl p-2.5 shadow-sm">${statusText}</p>
@@ -767,7 +860,7 @@ function setupChart() {
         },
         options: { 
             responsive: true, maintainAspectRatio: false, 
-            scales: { y: { beginAtZero: true } }, 
+            scales: { y: { beginAtZero: false, grace: '10%' } }, 
             animation: { duration: 0 } 
         }
     });
