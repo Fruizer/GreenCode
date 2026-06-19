@@ -20,7 +20,7 @@
         .glass-card { 
             background: rgba(255, 255, 255, 0.95); 
             box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.2); 
-            border: 1px solid rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.5); /* Crisp semi-transparent subtle boundary */
             backdrop-filter: blur(10px);
         }
         
@@ -124,6 +124,7 @@
         </section>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" id="detailSection">
+            
             <section class="lg:col-span-2 flex items-center gap-4">
                 <button onclick="prevDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
                     <span class="text-xl leading-none">&larr;</span>
@@ -230,12 +231,15 @@
                 </button>
             </section>
 
-            <div class="flex flex-col gap-6 h-fit">
+           <div class="flex flex-col gap-6 h-fit">
                 
-                <section class="glass-card p-6 rounded-2xl flex flex-col">
+                <section class="glass-card p-6 rounded-2xl flex flex-col border-t-4">
                     <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions & Deliberations</h2>
-                    <div class="flex-1 bg-gray-200 rounded-xl p-4 overflow-y-auto max-h-[400px]">
-                        <p id="suggestionText" class="text-sm font-bold text-gray-600 whitespace-pre-wrap">System ready. Input your code or upload files to begin analysis.</p>
+                    
+                    <div class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                        <div id="suggestionText" class="overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
+                            <div class="text-xs font-bold text-gray-600 whitespace-pre-wrap leading-relaxed text-center mt-4">System ready. Input your code or upload files to begin analysis.</div>
+                        </div>
                     </div>
                 </section>
                 
@@ -243,7 +247,7 @@
                     <h2 id="ecoImpactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
                         Real-World Impact Equivalent
                     </h2>
-                    <div id="ecoImpactText" class="flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed">
+                    <div id="ecoImpactText" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed text-center">
                         Awaiting workload completion to calculate environmental equivalents.
                     </div>
                 </section>
@@ -252,13 +256,13 @@
                     <h2 id="funFactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
                         Engineering Fun Facts
                     </h2>
-                    <div id="funFactText" class="flex-1 bg-gray-200 rounded-xl p-4 text-sm font-bold text-gray-500 leading-relaxed">
+                    <div id="funFactText" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed text-center">
                         Awaiting workload completion for architectural insights.
                     </div>
                 </section>
 
             </div>
-            </div>
+        </div>
     </main>
 
     <section id="tab-history" class="container mx-auto mt-6 p-4 tab-hidden mb-12">
