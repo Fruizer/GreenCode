@@ -678,19 +678,6 @@ function generateActionableDiagnostics(data) {
     let cpuHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
     let memHtml = `<div class="max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">`; 
 
-    // COMPLEXITY UI INJECTION
-    htmlContent += `
-        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 shadow-sm">
-            <h5 class="text-blue-800 font-black text-[10px] uppercase tracking-widest mb-2">Complexity Diagnosis: ${complexityStatus}</h5>
-            <p class="text-[11px] text-gray-700 leading-relaxed font-bold">
-                ${complexityAdvice}
-            </p>
-            <div class="mt-3 bg-white/50 p-2 rounded-lg border border-blue-100 italic text-[10px] text-blue-900">
-                💡 <b>Insight:</b> ${data.ops.toLocaleString()} Ops isn't just a number; it represents the exact times the CPU fetched an instruction. By refactoring to O(1), you allow the CPU to stay in a low-power state longer.
-            </div>
-        </div>
-    `;
-
     // --- STEP 1: PARSE LINT RULES FIRST ---
     let lintRulesHtml = "";
     lines.forEach((line, index) => {
@@ -773,20 +760,25 @@ function generateActionableDiagnostics(data) {
     cpuHtml += `</div>`; 
     memHtml += `</div>`; 
 
-    // --- STEP 2: RENDER COMPILER LINTER STATUS AT THE VERY TOP ---
+    // ==========================================
+    // UI REORDERING: THIS CONTROLS THE STACK
+    // ==========================================
+    let finalLayoutHtml = htmlContent;
+
+    // 1. TOP CARD: COMPILER LINTER STATUS
     if (issuesFound === 0) {
-        htmlContent += `
+        finalLayoutHtml += `
             <div class="bg-emerald-50 border border-emerald-200 rounded-xl py-3 px-4 mb-4 flex items-center gap-2 shadow-sm">
                 <span class="text-emerald-800 font-black text-xs uppercase tracking-wider">Structural Efficiency Verified</span>
             </div>`;
     } else {
-        htmlContent += `
+        finalLayoutHtml += `
             <div class="bg-red-50 border border-red-200 rounded-xl py-3 px-4 mb-4 flex items-center gap-2 shadow-sm animate-pulse">
                 <span class="text-red-800 font-black text-xs uppercase tracking-wider">${issuesFound} Architectural Risk(s) Flagged</span>
             </div>`;
     }
 
-    // --- STEP 3: CALCULATE THE THREE-TIER EEI STATUS CARD ---
+    // 2. MIDDLE CARD: ENERGY EFFICIENCY INDEX (EEI)
     const execution_duration = data.duration || 0.01;
     let totalJoules = (data.cpu_joules || 0) + (data.mem_joules || 0) + (C_BASE * (1 + Math.log1p(execution_duration)));
     let opsCount = data.ops || 0;
@@ -813,7 +805,7 @@ function generateActionableDiagnostics(data) {
             statusText = "OPTIMIZED ARCHITECTURE: High instruction throughput velocity achieved. Structural energy overhead minimized.";
         }
 
-        htmlContent += `
+        finalLayoutHtml += `
             <div class="border ${statusColorClass} rounded-2xl p-4 mb-4 shadow-sm font-sans">
                 <div class="flex justify-between items-center mb-2">
                     <span class="font-black text-xs uppercase text-gray-700 tracking-wider">
@@ -823,16 +815,30 @@ function generateActionableDiagnostics(data) {
                         ${microJoulesPerOp.toFixed(4)} μJ / Op
                     </span>
                 </div>
-                <p class="text-[10px] font-bold text-gray-600 leading-relaxed uppercase tracking-wide bg-white/80 border border-gray-200/60 rounded-xl p-2.5 shadow-sm">${statusText}</p>
+                <p class="text-xs font-bold text-gray-600 leading-relaxed uppercase tracking-wide bg-white/80 border border-gray-200/60 rounded-xl p-3 shadow-sm">${statusText}</p>
             </div>
         `;
     }
 
+    // 3. BOTTOM CARD: COMPLEXITY DIAGNOSIS (Moved here and text increased)
+    finalLayoutHtml += `
+        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 shadow-sm">
+            <h5 class="text-blue-800 font-black text-xs uppercase tracking-widest mb-2">Complexity Diagnosis: ${complexityStatus}</h5>
+            <p class="text-sm text-gray-700 leading-relaxed font-bold">
+                ${complexityAdvice}
+            </p>
+            <div class="mt-3 bg-white/50 p-3 rounded-lg border border-blue-100 italic text-xs text-blue-900 leading-relaxed">
+                💡 <b>Insight:</b> ${data.ops.toLocaleString()} Ops isn't just a number; it represents the exact times the CPU fetched an instruction. By refactoring to O(1), you allow the CPU to stay in a low-power state longer.
+            </div>
+        </div>
+    `;
+
+    // 4. APPEND LINT RULES AT THE VERY BOTTOM (If any)
     if (issuesFound > 0) {
-        htmlContent += `<div class="space-y-3">${lintRulesHtml}</div>`;
+        finalLayoutHtml += `<div class="space-y-3">${lintRulesHtml}</div>`;
     }
 
-    suggestionEl.innerHTML = htmlContent;
+    suggestionEl.innerHTML = finalLayoutHtml;
 
     if (cpuTrace) cpuTrace.innerHTML = cpuHtml.includes("Line ") ? cpuHtml : '<span class="text-blue-300/70 font-mono text-xs uppercase tracking-widest">No heavy CPU ops traced.</span>';
     if (memTrace) memTrace.innerHTML = memHtml.includes("Line ") ? memHtml : '<span class="text-purple-300/70 font-mono text-xs uppercase tracking-widest">No heavy memory allocations traced.</span>';
