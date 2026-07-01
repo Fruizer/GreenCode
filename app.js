@@ -527,6 +527,7 @@ function updateLiveUI(res, currentTime) {
     const dynTimeEl = document.getElementById('dynTime');
 
     // Newly Added Manuscript Spans
+    const mathOpsTallyEl = document.getElementById('mathOpsTally');
     const calcOpsEl = document.getElementById('calcOps');
     const calcBytesEl = document.getElementById('calcBytes');
     const calcTimeEl = document.getElementById('calcTime');
@@ -546,6 +547,7 @@ function updateLiveUI(res, currentTime) {
     if (brBaseEl) brBaseEl.innerText = `${C_BASE.toFixed(6)} J`;
 
     // 2. Manuscript Formula Substitution Matrix Injection
+    if (mathOpsTallyEl) mathOpsTallyEl.innerText = res.ops.toLocaleString();
     if (calcOpsEl) calcOpsEl.innerText = res.ops.toLocaleString();
     if (calcBytesEl) calcBytesEl.innerText = res.bytes.toLocaleString();
     if (calcTimeEl) calcTimeEl.innerText = execution_duration.toFixed(2);
@@ -559,6 +561,9 @@ function updateLiveUI(res, currentTime) {
     if (dynTotalEl) dynTotalEl.textContent = current_J.toFixed(6);
     if (dynTotalMilliEl) dynTotalMilliEl.textContent = current_J.toFixed(6);
     if (dynTimeEl) dynTimeEl.textContent = execution_duration.toFixed(2) + "s";
+    
+    const dynTime2El = document.getElementById('dynTime2');
+    if (dynTime2El) dynTime2El.textContent = execution_duration.toFixed(2) + "s";
     if (dynPowerCalculatedEl) dynPowerCalculatedEl.textContent = instant_mW_value;
 
     const liveOps = res.ops || 0;
