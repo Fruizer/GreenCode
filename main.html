@@ -167,35 +167,43 @@
                         <div class="bg-[#111827] text-emerald-400 p-4 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
                             <p class="text-emerald-200 mb-2 font-bold text-xs">/// THERMODYNAMIC DYNAMIC MATH PROOF ///</p>
                             
-                            <!-- Formal Theoretical Mathematical Models -->
+                           <div class="bg-black/40 p-3 rounded border border-gray-800 mb-2 text-gray-300">
+                                <p class="font-bold text-blue-400">1. Structural Complexity Model [Eq 3.1]</p>
+                                <p class="font-mono text-xs pl-2 text-blue-300">N_ops = Σ (f_k × w_k)</p>
+                                <p class="pl-3 text-[9px] text-gray-400">Structural Weights Matrix (w_k):</p>
+                                <p class="pl-5 text-[9px] text-gray-400">• Loops (for/while): w = 2 &nbsp;&nbsp; • I/O (print): w = 50 &nbsp;&nbsp; • File IO (open): w = 100</p>
+                                <p class="pl-3 text-[9px] text-gray-500 italic">Live State: Total Accumulated Token Cycles = <span id="mathOpsTally" class="text-blue-400 font-bold">0</span></p>
+                            </div>
+                        
                             <div class="bg-black/40 p-3 rounded border border-gray-800 mb-3 space-y-1 text-gray-300">
-                                <p class="font-bold text-emerald-300">Equation 4.1: E_total = E_cpu + E_mem + E_base</p>
-                                <p class="pl-3 text-[9px] text-gray-400">Where:</p>
-                                <p class="pl-3 text-[9px] text-gray-400">• E_cpu = N_ops × C_cpu &nbsp;&nbsp; (C_cpu = 1.5 × 10⁻⁹ J/Op)</p>
-                                <p class="pl-3 text-[9px] text-gray-400">• E_mem = M_peak × T_exec × C_mem &nbsp;&nbsp; (C_mem = 2.25 × 10⁻⁹ J/Byte·s)</p>
+                                <p class="font-bold text-emerald-300">2. Thermodynamic Energy Translation [Eq 4.1]</p>
+                                <p class="font-mono text-xs pl-2 text-emerald-400">E_total = E_cpu + E_mem + E_base</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_cpu = N_ops × 1.5 × 10⁻⁹ J/Op</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_mem = M_peak × T_exec × 2.25 × 10⁻⁹ J/Byte·s</p>
                                 <p class="pl-3 text-[9px] text-gray-400">• E_base = C_base = 0.0005 J</p>
                             </div>
-
-                            <!-- Real-Time Empirical Substitution Auditor -->
+                        
                             <div class="text-gray-300 font-mono text-[9px] sm:text-[10px] space-y-2 pt-1 border-t border-gray-800">
                                 <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider">Live Mathematical Substitution Matrix:</p>
                                 
                                 <div>
-                                    <p class="text-blue-400 font-bold">1. CPU Energy Allocation (E_cpu):</p>
-                                    <p class="pl-3 text-gray-400"><span id="calcOps">0</span> Ops × (1.5e-9 J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> J</p>
+                                    <p class="text-blue-400 font-bold">E_cpu Model Substitution:</p>
+                                    <p class="pl-3 text-gray-400"><span id="calcOps">0</span> N_ops × (1.5e-9 J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> J</p>
                                 </div>
-
+                        
                                 <div>
-                                    <p class="text-purple-400 font-bold">2. Memory Energy Allocation (E_mem):</p>
+                                    <p class="text-purple-400 font-bold">E_mem Model Substitution:</p>
                                     <p class="pl-3 text-gray-400"><span id="calcBytes">0</span> Bytes × <span id="calcTime">0.00</span>s × (2.25e-9 J) = <span id="dynMem" class="text-purple-400 font-black">0.000000</span> J</p>
                                 </div>
-
+                        
                                 <div class="border-t border-gray-800 pt-2 font-bold text-white space-y-1">
-                                    <p class="text-[9px] uppercase text-gray-400 tracking-wider">Dynamic Final Assembly:</p>
+                                    <p class="text-[9px] uppercase text-gray-400 tracking-wider">Dynamic Final Integration Matrix:</p>
                                     <p class="text-xs">E_total = <span id="subCpu" class="text-blue-400">0.000000 J</span> + <span id="subMem" class="text-purple-400">0.000000 J</span> + <span class="text-gray-400">0.000500 J</span></p>
                                     <p class="text-emerald-400 text-xs">Calculated Result: E_total = <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> Joules</p>
-                                    <p class="text-gray-400 text-[10px]">Avg Power Estimation: (<span id="dynTotalMilli">0.000500</span> J / <span id="dynTime">0.00s</span>) * 1000 = <span id="dynPowerCalculated" class="text-emerald-400">2</span> mW</p>
+                                    <p class="text-gray-400 text-[10px]">Avg Power Estimation: (<span id="dynTotalMilli" class="text-gray-400">0.000500</span> J / <span id="dynTime2">0.00s</span>) * 1000 = <span id="dynPowerCalculated" class="text-emerald-400">2</span> mW</p>
                                 </div>
+                            </div>
+                        </div>
                                 
                                 <div class="border-t border-gray-800 mt-2 pt-2 text-yellow-300">
                                     <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider mb-1">Energy Efficiency Index (EEI)</p>
