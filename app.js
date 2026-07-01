@@ -297,6 +297,7 @@ async function executeBatch(scriptArray, isTimed = false) {
     analysisResults = executionPlan.map(plan => ({
         name: plan.displayName,
         content: plan.originalContent, 
+        instrumentedCode: plan.filesToPass[0]?.content || "", 
         ops: 0, bytes: 0, joules: 0, kwh: 0, cpu_joules: 0, mem_joules: 0, milliwatts: BASELINE_MW, error: null,
         status: 'RUNNING', 
         history: Array(25).fill(BASELINE_MW),
@@ -307,6 +308,8 @@ async function executeBatch(scriptArray, isTimed = false) {
     currentDetailIndex = 0;
     renderAnalysisTable();
     updateCarouselUI();
+
+    if (typeof updateOpsAuditInspector === 'function') updateOpsAuditInspector(0);
 
     await new Promise(resolve => setTimeout(resolve, 1500));
 
@@ -416,7 +419,7 @@ async function executeBatch(scriptArray, isTimed = false) {
         
         clearInterval(executionTimerInterval);
         if (timerEl && finalMaxDuration > 0) {
-            timerEl.innerText = finalMaxDuration.toFixed(2) + "s";
+            timerEl.innerText = finalMaxDuration.toFixed(2) + "s"
         }
 
         updateCarouselUI(); 
@@ -1145,3 +1148,47 @@ async function deleteSelectedHistory() {
         alert("Failed to delete records. Check console for details.");
     }
 }
+
+
+// ====================================================================
+// DETERMINISTIC OPS TELEMETRY VISUALIZER (AUDIT PROOF ENGINE)
+// ====================================================================
+function updateOpsAuditInspector(index) {
+    const res = analysisResults[index];
+    const targetNameEl = document.getElementById('auditTargetName');
+    const codeViewerEl = document.getElementById('auditCodeViewer');
+    
+    if (!res) return;
+    if (targetNameEl) targetNameEl.textContent = res.name;
+    
+    if (codeViewerEl) {
+        if (!res.instrumentedCode) {
+            codeViewerEl.innerHTML = `<span class="text-slate-500">// No compiled source instrumentation data present.</span>`;
+            return;
+        }
+        
+        // Escape HTML tags to prevent dangerous execution inside code viewer container
+        let escapedHTML = res.instrumentedCode
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+            
+        // Dynamically style tracking counter injections to prove math implementation to panelists
+        escapedHTML = escapedHTML.replace(/(_green_tracker\['ops'\]\s*\+=\s*\d+)/g, '<span class="bg-emerald-950 text-emerald-400 border border-emerald-500/40 px-1 py-0.5 rounded font-black shadow-inner">$1 &lt;-- EXECUTION TRACKER HOOK</span>');
+        escapedHTML = escapedHTML.replace(/(_check_telemetry\(\))/g, '<span class="text-blue-400 italic font-bold animate-pulse">$1</span>');
+        
+        codeViewerEl.innerHTML = escapedHTML;
+    }
+}
+
+// Intercept window selection logic to seamlessly swap audit data displays 
+const originalJumpToDetail = window.jumpToDetail;
+window.jumpToDetail = function(index) {
+    if (typeof originalJumpToDetail === "function") {
+        originalJumpToDetail(index);
+    } else {
+        currentDetailIndex = index;
+        updateCarouselUI();
+    }
+    updateOpsAuditInspector(index);
+};
