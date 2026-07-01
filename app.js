@@ -1135,7 +1135,7 @@ async function deleteSelectedHistory() {
     const tableBody = document.getElementById('dbHistoryTableBody');
     tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
 
-    try {
+  try {
         const { error } = await supabaseClient.from('history').delete().in('id', selectedIds);
         if (error) throw error;
         await fetchAccountHistory(); 
@@ -1147,40 +1147,36 @@ async function deleteSelectedHistory() {
 }
 
 // ==========================================
-// OPS CALCULATION PROOF MODAL LOGIC
+// INTERACTIVE PROOF PROTOCOL (GLOBAL SCOPE)
 // ==========================================
-function showOpsCalculation() {
-    // Ensure there is actually data to show
+window.showOpsCalculation = function() {
     if (!analysisResults || analysisResults.length === 0) {
         alert("Please run an analysis first to view the calculation proof.");
         return;
     }
     
-    // 1. Grab the raw code for the specific file currently on the screen
+    // Grab the current active script data from the carousel state
     const currentRes = analysisResults[currentDetailIndex];
     const rawCode = currentRes.content || "";
     
-    // 2. Pass it through your exact Lexical Analyzer to generate the proof
+    // Run it through the Lexical Analyzer to generate the string mapping
     const instrumentedCode = instrumentPythonCodeJS(rawCode);
     
-    // 3. Output it to the modal
+    // Push the string to the modal terminal view
     document.getElementById('opsModalCode').textContent = instrumentedCode;
     
-    // 4. Trigger the modal animations
+    // Display the panel interface
     const modal = document.getElementById('opsModal');
     modal.classList.remove('hidden');
-    
-    // Small delay ensures the CSS transition triggers smoothly
     setTimeout(() => {
         modal.classList.remove('opacity-0');
     }, 10);
-}
+};
 
-function closeOpsModal() {
+window.closeOpsModal = function() {
     const modal = document.getElementById('opsModal');
     modal.classList.add('opacity-0');
-    
     setTimeout(() => {
         modal.classList.add('hidden');
-    }, 300); // Matches the CSS transition duration
-}
+    }, 300);
+};
