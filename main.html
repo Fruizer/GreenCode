@@ -123,151 +123,172 @@
             </div>
         </section>
 
-        <div class="flex flex-col gap-6" id="detailSection">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" id="detailSection">
             
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                <div class="lg:col-span-2 glass-card p-6 rounded-2xl flex items-center gap-4">
-                    <button onclick="prevDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px] h-fit">
-                        <span class="text-xl leading-none">&larr;</span>
-                        <span class="text-[8px] font-bold mt-1 uppercase text-center">Prev</span>
-                    </button>
+            <section class="lg:col-span-2 flex items-center gap-4">
+                <button onclick="prevDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
+                    <span class="text-xl leading-none">&larr;</span>
+                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Prev</span>
+                </button>
 
-                    <div class="flex-1 flex flex-col items-center">
-                        <h3 class="text-xs font-black text-[#115e59] uppercase tracking-widest mb-2">Real-Time Physics Model</h3>
-                        <div class="w-full h-48 bg-white border border-gray-200 rounded p-2 mb-2">
+                <div class="flex-1 flex flex-col gap-4">
+                    
+                    <div class="glass-card p-6 rounded-2xl flex flex-col items-center">
+                        <h3 class="text-sm font-black text-[#115e59] uppercase tracking-widest mb-2">Real-Time Physics Model</h3>
+                        <div class="w-full h-48 bg-white border border-gray-200 rounded p-2 mb-4">
                             <canvas id="energyChart"></canvas>
                         </div>
-                        <h4 id="detailFilename" class="font-black text-sm tracking-wider uppercase text-center break-all text-gray-400">AWAITING SCRIPT</h4>
-                    </div>
-                </div>
-
-                <div class="flex flex-col gap-4 justify-between">
-                    <div class="glass-card p-5 rounded-xl text-center border-b-4 border-emerald-500 flex-1 flex flex-col justify-center">
-                        <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Compute Power</p>
-                        <p id="detailMilliwatts" class="text-3xl font-black text-[#115e59] mt-2">0 <span class="text-xl">mW</span></p>
-                        <p class="text-[10px] text-emerald-700 font-bold tracking-widest uppercase mt-2 border-t border-emerald-100 pt-2">
-                            Absolute Work: <span id="detailJoules" class="font-mono">0.000000 J</span>
-                        </p>
-                    </div>
-                    <div class="glass-card p-5 rounded-xl text-center border-b-4 border-blue-500 flex-1 flex flex-col justify-center">
-                        <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
-                        <p id="detailOps" class="text-3xl font-black text-blue-800 mt-2 font-mono">0</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="glass-card p-6 rounded-2xl border border-gray-200 shadow-sm w-full">
-                <div class="flex items-center justify-between border-b border-gray-200 pb-3 mb-4">
-                    <div>
-                        <h2 class="text-xs text-[#115e59] font-black uppercase tracking-widest">Thermodynamic Math Proof</h2>
-                        <p class="text-[9px] text-gray-400 font-mono mt-0.5">MANUSCRIPT CHAPTER 4 VERIFICATION LAYER</p>
-                    </div>
-                    <span class="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest px-2 py-1 rounded shadow-sm border border-emerald-200">HEURISTIC ESTIMATION</span>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-[#111827] text-emerald-400 p-5 rounded-xl font-mono text-[11px] leading-relaxed shadow-inner mb-4">
-                    
-                    <div class="space-y-3 border-b lg:border-b-0 lg:border-r border-gray-800 pb-4 lg:pb-0 lg:pr-4">
-                        <p class="text-emerald-200 font-bold border-b border-gray-800 pb-1">/// METRIC EMISSION MODELLING</p>
-                        
-                        <div class="bg-black/40 p-3 rounded border border-gray-800/60 space-y-1">
-                            <p class="font-bold text-blue-400">1. Structural Complexity Model [Eq 3.1]</p>
-                            <p class="font-mono text-xs text-blue-300">N_ops = Σ (f_k × w_k)</p>
-                            <p class="text-[10px] text-gray-400">Weights Matrix: Loops = 2 | Print = 50 | Open = 100</p>
-                            <p class="text-[10px] text-blue-300 font-bold">Total Token Cycles = <span id="mathOpsTally">0</span></p>
-                        </div>
-
-                        <div class="bg-black/40 p-3 rounded border border-gray-800/60 space-y-1">
-                            <p class="font-bold text-emerald-300">2. Thermodynamic Energy Translation [Eq 4.1]</p>
-                            <p class="font-mono text-xs text-emerald-400">E_total = E_cpu + E_mem + E_base</p>
-                            <p class="text-[10px] text-gray-400">• E_cpu = N_ops × 1.5 × 10⁻⁹ J/Op</p>
-                            <p class="text-[10px] text-gray-400">• E_mem = M_peak × T_exec × 2.25 × 10⁻⁹ J/Byte·s</p>
-                            <p class="text-[10px] text-gray-400">• E_base = C_base = 0.0005 J</p>
-                        </div>
+                        <h4 id="detailFilename" class="font-black text-lg tracking-wider uppercase text-center break-all text-gray-400">AWAITING SCRIPT</h4>
                     </div>
 
-                    <div class="space-y-3 flex flex-col justify-between">
-                        <div>
-                            <p class="text-emerald-200 font-bold border-b border-gray-800 pb-1">/// LIVE MATHEMATICAL SUBSTITUTION MATRIX</p>
-                            <div class="mt-2 space-y-2 text-gray-300 text-[10px] sm:text-[11px]">
-                                <p><b class="text-blue-400">E_cpu:</b> <span id="calcOps" class="text-blue-300">0</span> N_ops × 1.5e-9 J = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> J</p>
-                                <p><b class="text-purple-400">E_mem:</b> <span id="calcBytes" class="text-purple-300">0</span> Bytes × <span id="calcTime" class="text-white">0.00</span>s × 2.25e-9 = <span id="dynMem" class="text-purple-400 font-black">0.000000</span> J</p>
+                   <div class="grid grid-cols-2 gap-4">
+                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-emerald-500 flex flex-col justify-center">
+                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Total Compute Power</p>
+                            <div class="flex items-baseline justify-center gap-2 mt-1">
+                                <p id="detailMilliwatts" class="text-2xl lg:text-3xl font-black text-[#115e59]">0 <span class="text-xl">mW</span></p>
                             </div>
-                        </div>
-
-                        <div class="bg-black/50 p-3 rounded-lg border border-gray-800 text-white space-y-1">
-                            <p class="text-[10px] font-black tracking-wide text-gray-400 uppercase">Dynamic Final Integration Matrix</p>
-                            <p class="text-xs font-mono">E_total = <span id="subCpu" class="text-blue-400">0.000000 J</span> + <span id="subMem" class="text-purple-400">0.000000 J</span> + <span class="text-gray-500">0.000500 J</span></p>
-                            <p class="text-emerald-400 font-black text-xs">Calculated Result: E_total = <span id="dynTotal">0.000500</span> Joules</p>
-                            <p class="text-gray-400 text-[10px] border-t border-gray-900 pt-1 mt-1">
-                                Avg Power Estimation: (<span id="dynTotalMilli">0.000500</span> J / <span id="dynTime2">0.00s</span>) * 1000 = <span id="dynPowerCalculated" class="text-emerald-400 font-bold">2</span> mW
+                            <p class="text-[10px] text-emerald-700 font-bold tracking-widest uppercase mt-1">
+                                Absolute Work: <span id="detailJoules">0.000000 J</span>
                             </p>
                         </div>
-                    </div>
-                </div>
+                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
+                            <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
+                            <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800">0</p>
+                        </div>
+                    </div>  
 
-                <div class="border-t border-gray-800 pt-2 text-yellow-300 font-mono text-[11px] mb-4 pl-1">
-                    <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider mb-1">Energy Efficiency Index (EEI)</p>
-                    <p>Formula: EEI = E_total / N_ops</p>
-                    <p class="mt-0.5 text-white font-black">Unit Cost: EEI = <span id="dynEei" class="text-yellow-400 font-mono">0.0000 μJ / Op</span></p>
-                </div>
+                    <div class="glass-card p-6 rounded-xl bg-gray-50 border border-gray-200 shadow-sm">
+                        
+                        <div class="flex items-center justify-between border-b border-gray-200 pb-2 mb-4">
+                            <p class="text-xs text-[#115e59] font-black uppercase tracking-widest">Thermodynamic Math Proof</p>
+                            <span class="bg-emerald-100 text-emerald-800 text-[9px] font-black tracking-widest px-2 py-0.5 rounded shadow-sm border border-emerald-200">HEURISTIC ESTIMATION</span>
+                        </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm font-mono text-gray-700">
-                    <div class="flex flex-col rounded bg-white border border-gray-200 shadow-sm border-l-4 border-blue-500 overflow-hidden">
-                        <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors" onclick="document.getElementById('cpuTracePanel').classList.toggle('hidden')">
-                            <div class="flex items-center gap-2">
-                                <span class="font-bold text-gray-600 text-xs">Live CPU Work:</span>
-                                <span class="bg-blue-100 text-blue-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-blue-200 transition">(Click for trace)</span>
+                        <div class="bg-[#111827] text-emerald-400 p-4 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
+                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// THERMODYNAMIC DYNAMIC MATH PROOF ///</p>
+                            
+                            <div class="bg-black/40 p-3 rounded border border-gray-800 mb-2 text-gray-300">
+                                <p class="font-bold text-blue-400">1. Structural Complexity Model [Eq 3.1]</p>
+                                <p class="font-mono text-xs pl-2 text-blue-300">N_ops = Σ (f_k × w_k)</p>
+                                <p class="pl-3 text-[9px] text-gray-400">Structural Weights Matrix (w_k):</p>
+                                <p class="pl-5 text-[9px] text-gray-400">• Loops (for/while): w = 2 &nbsp;&nbsp; • I/O (print): w = 50 &nbsp;&nbsp; • File IO (open): w = 100</p>
+                                <p class="pl-3 text-[9px] text-gray-500 italic">Live State: Total Accumulated Token Cycles = <span id="mathOpsTally" class="text-blue-400 font-bold">0</span></p>
                             </div>
-                            <span id="breakdownCpu" class="text-blue-600 font-black text-xs">0.000000 J</span>
-                        </div>
-                        <div id="cpuTracePanel" class="hidden bg-[#1e293b] text-white p-4 border-t border-gray-200 max-h-[220px] overflow-y-auto custom-scrollbar">
-                            <p id="cpuTraceContent" class="text-[11px] text-blue-200 leading-relaxed">Awaiting execution trace mapping...</p>
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col rounded bg-white border border-gray-200 shadow-sm border-l-4 border-purple-500 overflow-hidden">
-                        <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-purple-50 transition-colors" onclick="document.getElementById('memTracePanel').classList.toggle('hidden')">
-                            <div class="flex items-center gap-2">
-                                <span class="font-bold text-gray-600 text-xs">Live Memory Work:</span>
-                                <span class="bg-purple-100 text-purple-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-purple-200 transition">(Click for trace)</span>
+                        
+                            <div class="bg-black/40 p-3 rounded border border-gray-800 mb-3 space-y-1 text-gray-300">
+                                <p class="font-bold text-emerald-300">2. Thermodynamic Energy Translation [Eq 4.1]</p>
+                                <p class="font-mono text-xs pl-2 text-emerald-400">E_total = E_cpu + E_mem + E_base</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_cpu = N_ops × 1.5 × 10⁻⁹ J/Op</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_mem = M_peak × T_exec × 2.25 × 10⁻⁹ J/Byte·s</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_base = C_base = 0.0005 J</p>
                             </div>
-                            <span id="breakdownMem" class="text-purple-600 font-black text-xs">0.000000 J</span>
+                        
+                            <div class="text-gray-300 font-mono text-[9px] sm:text-[10px] space-y-2 pt-1 border-t border-gray-800">
+                                <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider">Live Mathematical Substitution Matrix:</p>
+                                
+                                <div>
+                                    <p class="text-blue-400 font-bold">E_cpu Model Substitution:</p>
+                                    <p class="pl-3 text-gray-400"><span id="calcOps">0</span> N_ops × (1.5e-9 J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> J</p>
+                                </div>
+                        
+                                <div>
+                                    <p class="text-purple-400 font-bold">E_mem Model Substitution:</p>
+                                    <p class="pl-3 text-gray-400"><span id="calcBytes">0</span> Bytes × <span id="calcTime">0.00</span>s × (2.25e-9 J) = <span id="dynMem" class="text-purple-400 font-black">0.000000</span> J</p>
+                                </div>
+                        
+                                <div class="border-t border-gray-800 pt-2 font-bold text-white space-y-1">
+                                    <p class="text-[9px] uppercase text-gray-400 tracking-wider">Dynamic Final Integration Matrix:</p>
+                                    <p class="text-xs">E_total = <span id="subCpu" class="text-blue-400">0.000000 J</span> + <span id="subMem" class="text-purple-400">0.000000 J</span> + <span class="text-gray-400">0.000500 J</span></p>
+                                    <p class="text-emerald-400 text-xs">Calculated Result: E_total = <span id="dynTotal">0.000500</span> Joules</p>
+                                    <p class="text-gray-400 text-[10px]">Avg Power Estimation: (<span id="dynTotalMilli" class="text-gray-400">0.000500</span> J / <span id="dynTime2">0.00s</span>) * 1000 = <span id="dynPowerCalculated" class="text-emerald-400">2</span> mW</p>
+                                </div>
+                            </div>
                         </div>
-                        <div id="memTracePanel" class="hidden bg-[#1e293b] text-white p-4 border-t border-gray-200 max-h-[220px] overflow-y-auto custom-scrollbar">
-                            <p id="memTraceContent" class="text-[11px] text-purple-200 leading-relaxed">Awaiting memory pointers mapping...</p>
+                                
+                        <div class="border-t border-gray-800 mt-2 pt-2 text-yellow-300 font-mono text-[10px]">
+                            <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider mb-1">Energy Efficiency Index (EEI)</p>
+                            <p>Formula: EEI = E_total / N_ops</p>
+                            <p class="mt-1 text-white font-black">Unit Cost: EEI = <span id="dynEei" class="text-yellow-400 font-mono">0.0000 μJ / Op</span></p>
+                        </div>
+                        
+                        <div class="flex flex-col gap-3 text-sm font-mono text-gray-700 mt-4">
+                            
+                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-blue-500 overflow-hidden">
+                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors" onclick="document.getElementById('cpuTracePanel').classList.toggle('hidden')">
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-bold text-gray-600">Live CPU Work:</span>
+                                        <span class="bg-blue-100 text-blue-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-blue-200 transition">(Click for trace)</span>
+                                    </div>
+                                    <span id="breakdownCpu" class="text-blue-600 font-black">0.000000 J</span>
+                                </div>
+                                <div id="cpuTracePanel" class="hidden bg-[#273f87] text-white p-4 border-t border-gray-200 shadow-inner">
+                                    <p class="text-[10px] text-blue-200 font-black tracking-widest uppercase mb-2">CPU Line Trace:</p>
+                                    <div class="border-t border-blue-400/30 w-full mb-2"></div>
+                                    <p class="text-xs text-blue-100/70" id="cpuTraceContent">Awaiting execution data...</p>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col rounded bg-white shadow-sm border-l-4 border-purple-500 overflow-hidden">
+                                <div class="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-purple-50 transition-colors" onclick="document.getElementById('memTracePanel').classList.toggle('hidden')">
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-bold text-gray-600">Live Memory Work:</span>
+                                        <span class="bg-purple-100 text-purple-500 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full hover:bg-purple-200 transition">(Click for trace)</span>
+                                    </div>
+                                    <span id="breakdownMem" class="text-purple-600 font-black">0.000000 J</span>
+                                </div>
+                                <div id="memTracePanel" class="hidden bg-[#58219c] text-white p-4 border-t border-gray-200 shadow-inner">
+                                    <p class="text-[10px] text-purple-200 font-black tracking-widest uppercase mb-2">Memory Line Trace:</p>
+                                    <div class="border-t border-purple-400/30 w-full mb-2"></div>
+                                    <p class="text-xs text-purple-100/70" id="memTraceContent">Awaiting execution data...</p>
+                                </div>
+                            </div>
+
+                            <div class="flex justify-between items-center px-4 py-3 rounded bg-white shadow-sm border-l-4 border-gray-400">
+                                <span class="font-bold text-gray-600">System Base:</span>
+                                <span id="breakdownBase" class="text-gray-500 font-black">0.000500 J</span>
+                            </div>
+                            
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-                <section class="glass-card p-5 rounded-2xl flex flex-col border-t-4 border-teal-600">
-                    <h2 class="text-xs font-black text-[#115e59] uppercase tracking-widest mb-3 text-center">Suggestions & Deliberations</h2>
-                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 max-h-[300px] overflow-y-auto custom-scrollbar shadow-inner">
-                        <div id="suggestionText" class="text-xs font-bold text-gray-600 leading-relaxed">System ready. Input your code or upload files to begin analysis.</div>
+                </div>
+
+                <button onclick="nextDetail()" class="bg-white rounded-full p-4 shadow-md hover:bg-gray-100 transition flex flex-col items-center justify-center min-w-[60px]">
+                    <span class="text-xl leading-none">&rarr;</span>
+                    <span class="text-[8px] font-bold mt-1 uppercase text-center">Next</span>
+                </button>
+            </section>
+
+           <div class="flex flex-col gap-6 h-fit">
+                
+                <section class="glass-card p-6 rounded-2xl flex flex-col border-t-4">
+                    <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">Suggestions & Deliberations</h2>
+                    
+                    <div class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4">
+                        <div id="suggestionText" class="overflow-y-auto max-h-[350px] pr-2 custom-scrollbar">
+                            <div class="text-xs font-bold text-gray-600 whitespace-pre-wrap leading-relaxed text-center mt-4">System ready. Input your code or upload files to begin analysis.</div>
+                        </div>
                     </div>
                 </section>
                 
-                <section id="ecoImpactCard" class="glass-card p-5 rounded-2xl flex flex-col border-t-4 border-blue-600">
-                    <h2 id="ecoImpactHeader" class="text-xs font-black text-[#115e59] uppercase tracking-widest mb-3 text-center">Real-World Impact Equivalent</h2>
-                    <div id="ecoImpactText" class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed shadow-inner">
+                <section id="ecoImpactCard" class="glass-card p-6 rounded-2xl flex flex-col transition-colors">
+                    <h2 id="ecoImpactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
+                        Real-World Impact Equivalent
+                    </h2>
+                    <div id="ecoImpactText" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed text-center">
                         Awaiting workload completion to calculate environmental equivalents.
                     </div>
                 </section>
 
-                <section id="funFactCard" class="glass-card p-5 rounded-2xl flex flex-col border-t-4 border-emerald-600">
-                    <h2 id="funFactHeader" class="text-xs font-black text-[#115e59] uppercase tracking-widest mb-3 text-center">Engineering Fun Facts</h2>
-                    <div id="funFactText" class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed shadow-inner">
+                <section id="funFactCard" class="glass-card p-6 rounded-2xl flex flex-col transition-colors">
+                    <h2 id="funFactHeader" class="text-md font-black text-[#115e59] uppercase tracking-widest mb-4 text-center">
+                        Engineering Fun Facts
+                    </h2>
+                    <div id="funFactText" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs font-bold text-gray-500 leading-relaxed text-center">
                         Awaiting workload completion for architectural insights.
                     </div>
                 </section>
-            </div>
 
-            <div class="flex justify-between items-center bg-white/40 p-2.5 border border-white/60 rounded-xl max-w-xs mx-auto gap-4 shadow-sm backdrop-blur-sm mt-2">
-                <button onclick="prevDetail()" class="flex-1 bg-white hover:bg-gray-100 px-4 py-2 rounded-lg font-black text-[10px] uppercase tracking-wider shadow-sm border border-gray-200 active:scale-95 transition-transform text-gray-700">&larr; Prev Script</button>
-                <button onclick="nextDetail()" class="flex-1 bg-white hover:bg-gray-100 px-4 py-2 rounded-lg font-black text-[10px] uppercase tracking-wider shadow-sm border border-gray-200 active:scale-95 transition-transform text-gray-700">Next Script &rarr;</button>
             </div>
         </div>
     </main>
