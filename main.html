@@ -151,15 +151,11 @@
                                 Absolute Work: <span id="detailJoules">0.000000 J</span>
                             </p>
                         </div>
-                        <div onclick="showOpsCalculation()" class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500 cursor-pointer hover:bg-blue-50 transition-all shadow-sm relative group overflow-hidden">
+                        <div class="glass-card p-4 rounded-xl text-center border-b-4 border-blue-500">
                             <p class="text-xs text-blue-800 font-black uppercase tracking-widest">Complexity Ops</p>
-                            <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800 group-hover:scale-110 transition-transform">0</p>
-                            
-                            <div class="absolute inset-0 bg-blue-900/90 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <span class="text-blue-300 text-2xl mb-1">🔍</span>
-                                <span class="text-white text-[9px] font-black uppercase tracking-widest px-2 text-center">View Calculation<br>Proof</span>
-                            </div>
+                            <p id="detailOps" class="text-2xl lg:text-3xl font-black text-blue-800">0</p>
                         </div>
+                    </div>  
 
                     <div class="glass-card p-6 rounded-xl bg-gray-50 border border-gray-200 shadow-sm">
                         
@@ -169,21 +165,42 @@
                         </div>
 
                         <div class="bg-[#111827] text-emerald-400 p-4 rounded-lg mb-4 font-mono text-[10px] leading-relaxed shadow-inner">
-                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// THERMODYNAMIC PROOF ENGINE</p>
+                            <p class="text-emerald-200 mb-2 font-bold text-xs">/// THERMODYNAMIC DYNAMIC MATH PROOF ///</p>
                             
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-[9px] border-b border-gray-800 pb-2 text-gray-400">
-                                <div><span class="text-blue-400 font-bold">CPU Work (J)</span> = N_Ops × 1.5e-9</div>
-                                <div><span class="text-purple-400 font-bold">Memory Work (J)</span> = M_Bytes × Time × 2.25e-9</div>
+                            <!-- Formal Theoretical Mathematical Models -->
+                            <div class="bg-black/40 p-3 rounded border border-gray-800 mb-3 space-y-1 text-gray-300">
+                                <p class="font-bold text-emerald-300">Equation 4.1: E_total = E_cpu + E_mem + E_base</p>
+                                <p class="pl-3 text-[9px] text-gray-400">Where:</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_cpu = N_ops × C_cpu &nbsp;&nbsp; (C_cpu = 1.5 × 10⁻⁹ J/Op)</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_mem = M_peak × T_exec × C_mem &nbsp;&nbsp; (C_mem = 2.25 × 10⁻⁹ J/Byte·s)</p>
+                                <p class="pl-3 text-[9px] text-gray-400">• E_base = C_base = 0.0005 J</p>
                             </div>
 
-                            <div class="text-gray-300 font-mono text-[9px] sm:text-[10px] space-y-1">
-                                <p>Total Energy (J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> + <span id="dynMem" class="text-purple-400 font-black">0.000000</span> + <span class="text-gray-400">0.000500</span></p>
-                                <p>Avg Power (mW) = ( <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> / <span id="dynTime" class="text-white font-black">0.00s</span> ) * 1000</p>
+                            <!-- Real-Time Empirical Substitution Auditor -->
+                            <div class="text-gray-300 font-mono text-[9px] sm:text-[10px] space-y-2 pt-1 border-t border-gray-800">
+                                <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider">Live Mathematical Substitution Matrix:</p>
+                                
+                                <div>
+                                    <p class="text-blue-400 font-bold">1. CPU Energy Allocation (E_cpu):</p>
+                                    <p class="pl-3 text-gray-400"><span id="calcOps">0</span> Ops × (1.5e-9 J) = <span id="dynCpu" class="text-blue-400 font-black">0.000000</span> J</p>
+                                </div>
+
+                                <div>
+                                    <p class="text-purple-400 font-bold">2. Memory Energy Allocation (E_mem):</p>
+                                    <p class="pl-3 text-gray-400"><span id="calcBytes">0</span> Bytes × <span id="calcTime">0.00</span>s × (2.25e-9 J) = <span id="dynMem" class="text-purple-400 font-black">0.000000</span> J</p>
+                                </div>
+
+                                <div class="border-t border-gray-800 pt-2 font-bold text-white space-y-1">
+                                    <p class="text-[9px] uppercase text-gray-400 tracking-wider">Dynamic Final Assembly:</p>
+                                    <p class="text-xs">E_total = <span id="subCpu" class="text-blue-400">0.000000 J</span> + <span id="subMem" class="text-purple-400">0.000000 J</span> + <span class="text-gray-400">0.000500 J</span></p>
+                                    <p class="text-emerald-400 text-xs">Calculated Result: E_total = <span id="dynTotal" class="text-emerald-400 font-black">0.000500</span> Joules</p>
+                                    <p class="text-gray-400 text-[10px]">Avg Power Estimation: (<span id="dynTotalMilli">0.000500</span> J / <span id="dynTime">0.00s</span>) * 1000 = <span id="dynPowerCalculated" class="text-emerald-400">2</span> mW</p>
+                                </div>
                                 
                                 <div class="border-t border-gray-800 mt-2 pt-2 text-yellow-300">
                                     <p class="text-emerald-300 font-bold text-[9px] uppercase tracking-wider mb-1">Energy Efficiency Index (EEI)</p>
-                                    <p>Formula: EEI = Total Energy / Complexity Ops</p>
-                                    <p class="mt-1 text-white font-black">Unit Cost = <span id="dynEei" class="text-yellow-400 font-mono">0.0000e+0</span> Joules / Op</p>
+                                    <p>Formula: EEI = E_total / N_ops</p>
+                                    <p class="mt-1 text-white font-black">Unit Cost: EEI = <span id="dynEei" class="text-yellow-400 font-mono">0.0000 μJ / Op</span></p>
                                 </div>
                             </div>
                         </div>
@@ -360,28 +377,6 @@
             </div>
         </div>
     </div>
-
-<div id="opsModal" class="fixed inset-0 z-[200] flex items-center justify-center bg-gray-900/80 backdrop-blur-sm hidden opacity-0 transition-opacity duration-300">
-    <div class="bg-[#0f172a] border border-blue-500/50 rounded-2xl shadow-[0_0_40px_rgba(59,130,246,0.2)] p-6 flex flex-col w-full max-w-3xl mx-4 max-h-[85vh]">
-        
-        <div class="flex justify-between items-center border-b border-gray-700 pb-4 mb-4">
-            <div>
-                <h3 class="text-blue-400 font-black tracking-widest uppercase text-sm">Ops Calculation Proof</h3>
-                <p class="text-[10px] text-gray-400 font-mono mt-1 uppercase tracking-wider">System-Instrumented Code (Source of Truth)</p>
-            </div>
-            <button onclick="closeOpsModal()" class="text-gray-400 hover:text-white font-bold text-2xl leading-none transition-colors">&times;</button>
-        </div>
-        
-        <div class="bg-blue-950/30 border border-blue-900 rounded-lg p-3 mb-4 text-[11px] text-blue-200 font-mono leading-relaxed">
-            <span class="font-black text-blue-400 block mb-1">/// VALIDATION PROTOCOL</span>
-            Our Lexical Analyzer intercepts the raw string and dynamically injects `_green_tracker['ops']` inside loops and functions. The final Ops count is the deterministic sum of these physical hardware steps.
-        </div>
-
-        <div class="flex-1 overflow-y-auto bg-black p-4 rounded-xl border border-gray-800 custom-scrollbar shadow-inner">
-            <pre id="opsModalCode" class="text-emerald-300 font-mono text-xs leading-relaxed whitespace-pre-wrap"></pre>
-        </div>
-    </div>
-</div>
 
 </body>
 </html>
