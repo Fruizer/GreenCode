@@ -512,7 +512,7 @@ function updateLiveUI(res, currentTime) {
     }
     
     // ====================================================================
-    // DYNAMIC UI UPDATER
+    // DYNAMIC UI UPDATER (MANUSCRIPT EQUATION ALIGNED)
     // ====================================================================
     const detailJoulesEl = document.getElementById('detailJoules');
     const detailOpsEl = document.getElementById('detailOps');
@@ -520,25 +520,13 @@ function updateLiveUI(res, currentTime) {
     const brMemEl = document.getElementById('breakdownMem');
     const brBaseEl = document.getElementById('breakdownBase');
 
+    // Theoretical Element Selectors
     const dynCpuEl = document.getElementById('dynCpu');
     const dynMemEl = document.getElementById('dynMem');
     const dynTotalEl = document.getElementById('dynTotal');
     const dynTimeEl = document.getElementById('dynTime');
 
-   const execution_duration = currentTime || 0.01;
-    const current_J = res.cpu_joules + res.mem_joules + (C_BASE * (1 + Math.log1p(execution_duration)));
-    const instant_mW = res.status === 'RUNNING' ? (document.getElementById('detailMilliwatts').innerText.match(/\d+/)?.[0] || BASELINE_MW) : Math.ceil(res.milliwatts);
-
-    // Update Top Summary Cards
-    if (detailJoulesEl) detailJoulesEl.textContent = current_J.toFixed(6) + " J";
-    if (detailOpsEl) detailOpsEl.innerText = res.ops.toLocaleString();
-    
-    // Update Lower Diagnostic Trace Panels
-    if (brCpuEl) brCpuEl.innerText = `${res.cpu_joules.toFixed(6)} J`;
-    if (brMemEl) brMemEl.innerText = `${res.mem_joules.toFixed(6)} J`;
-    if (brBaseEl) brBaseEl.innerText = `${C_BASE.toFixed(6)} J`;
-
-    // Inject Raw Metrics directly into the Manuscript Equation Framework
+    // Newly Added Manuscript Spans
     const calcOpsEl = document.getElementById('calcOps');
     const calcBytesEl = document.getElementById('calcBytes');
     const calcTimeEl = document.getElementById('calcTime');
@@ -547,6 +535,17 @@ function updateLiveUI(res, currentTime) {
     const dynTotalMilliEl = document.getElementById('dynTotalMilli');
     const dynPowerCalculatedEl = document.getElementById('dynPowerCalculated');
 
+    const instant_mW_value = res.status === 'RUNNING' ? (document.getElementById('detailMilliwatts').innerText.match(/\d+/)?.[0] || BASELINE_MW) : Math.ceil(res.milliwatts);
+
+    // 1. Core Summary Value Injection
+    if (detailJoulesEl) detailJoulesEl.textContent = current_J.toFixed(6) + " J";
+    if (detailOpsEl) detailOpsEl.innerText = res.ops.toLocaleString();
+    
+    if (brCpuEl) brCpuEl.innerText = `${res.cpu_joules.toFixed(6)} J`;
+    if (brMemEl) brMemEl.innerText = `${res.mem_joules.toFixed(6)} J`;
+    if (brBaseEl) brBaseEl.innerText = `${C_BASE.toFixed(6)} J`;
+
+    // 2. Manuscript Formula Substitution Matrix Injection
     if (calcOpsEl) calcOpsEl.innerText = res.ops.toLocaleString();
     if (calcBytesEl) calcBytesEl.innerText = res.bytes.toLocaleString();
     if (calcTimeEl) calcTimeEl.innerText = execution_duration.toFixed(2);
@@ -560,13 +559,14 @@ function updateLiveUI(res, currentTime) {
     if (dynTotalEl) dynTotalEl.textContent = current_J.toFixed(6);
     if (dynTotalMilliEl) dynTotalMilliEl.textContent = current_J.toFixed(6);
     if (dynTimeEl) dynTimeEl.textContent = execution_duration.toFixed(2) + "s";
-    if (dynPowerCalculatedEl) dynPowerCalculatedEl.textContent = instant_mW;
+    if (dynPowerCalculatedEl) dynPowerCalculatedEl.textContent = instant_mW_value;
 
     const liveOps = res.ops || 0;
     const eeiEl = document.getElementById('dynEei');
     if (eeiEl) {
         eeiEl.textContent = liveOps > 0 ? ((current_J / liveOps) * 1000000).toFixed(4) + " μJ / Op" : "0.0000 μJ / Op";
     }
+
     const diagnostics = generateActionableDiagnostics(res);
     const issuesFound = diagnostics ? diagnostics.count : 0;
     const funFactsArray = diagnostics ? diagnostics.facts : [];
