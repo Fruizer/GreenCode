@@ -123,6 +123,48 @@
             </div>
         </section>
 
+        <section class="glass-card p-6 rounded-2xl mt-6">
+    <div class="flex justify-between items-center mb-4">
+        <div>
+            <h2 class="text-md font-black text-[#115e59] uppercase tracking-widest">Deterministic Operations Audit</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Live cryptographic proof of programmatic instruction tracking via token instrumentation.</p>
+        </div>
+        <span class="bg-blue-600 text-white text-[10px] font-mono uppercase font-black px-3 py-1 rounded-full shadow-sm">AST Proxy Engine</span>
+    </div>
+    
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+                <h3 class="text-xs font-black text-gray-700 uppercase tracking-wider mb-2">Static Token Weight Mapping</h3>
+                <div class="text-[11px] font-mono space-y-1.5 text-gray-600">
+                    <div class="flex justify-between border-b border-gray-200 pb-1"><span> open() (File I/O)</span><span class="text-red-600 font-bold">+100 Ops</span></div>
+                    <div class="flex justify-between border-b border-gray-200 pb-1"><span> print() (Standard Out)</span><span class="text-orange-600 font-bold">+50 Ops</span></div>
+                    <div class="flex justify-between border-b border-gray-200 pb-1"><span> for / while (Loops)</span><span class="text-blue-600 font-bold">+2 Ops</span></div>
+                    <div class="flex justify-between border-b border-gray-200 pb-1"><span> class (Data Structure)</span><span class="text-purple-600 font-bold">+2 Ops</span></div>
+                    <div class="flex justify-between border-b border-gray-200 pb-1"><span> def (Function Init)</span><span class="text-teal-600 font-bold">+1 Op</span></div>
+                    <div class="flex justify-between pb-1"><span> Standard Statement</span><span class="text-gray-500 font-bold">+1 Op</span></div>
+                </div>
+            </div>
+            <div class="mt-4 bg-[#115e59]/10 rounded-lg p-2.5 border border-[#115e59]/20">
+                <p class="text-[10px] text-[#115e59] font-sans leading-relaxed">
+                    <b>Panelist Defense Verification:</b> This engine compiles mathematical tracking instructions directly into active loop blocks before parsing into the background sandbox worker thread.
+                </p>
+            </div>
+        </div>
+
+        <div class="xl:col-span-2 flex flex-col">
+            <div class="bg-[#1e293b] text-gray-300 font-mono text-[11px] px-4 py-2 rounded-t-xl flex justify-between items-center border-b border-slate-700">
+                <span class="text-emerald-400 font-bold flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span> 
+                    Source Telemetry View: <span id="auditTargetName">No Script Selected</span>
+                </span>
+                <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">Compiler View</span>
+            </div>
+            <pre id="auditCodeViewer" class="bg-[#0f172a] text-emerald-300 font-mono text-xs p-4 rounded-b-xl overflow-auto h-56 border border-slate-800 shadow-inner whitespace-pre-wrap leading-relaxed">Select a script file from the results layout above or execute an editor run to inspect execution tracking telemetry hooks in real-time.</pre>
+        </div>
+    </div>
+</section>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start" id="detailSection">
             
             <section class="lg:col-span-2 flex items-center gap-4">
