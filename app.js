@@ -440,56 +440,10 @@ function renderAnalysisTable() {
 
     analysisResults.forEach((res, index) => {
         const bgClass = index % 2 === 0 ? "bg-white" : "bg-gray-50";
-        
-        // --- LIVE STRUCTURAL PARSER AUDIT METRICS ---
-        // Scans the raw code string to prove token counts match the math
-        const rawCode = res.content || "";
-        const loopMatches = (rawCode.match(/\b(for|while)\b/g) || []).length;
-        const printMatches = (rawCode.match(/\bprint\b/g) || []).length;
-        const defMatches = (rawCode.match(/\bdef\b/g) || []).length;
-        
         tbody.innerHTML += `
             <tr id="row-${index}" class="${bgClass} border-b border-gray-100 cursor-pointer hover:bg-emerald-50" onclick="jumpToDetail(${index})">
                 <td class="py-3 px-4 font-bold text-gray-700">${res.name}</td>
-                
-                <td class="py-3 px-4 text-blue-600 font-mono op-cell relative group" onclick="event.stopPropagation();">
-                    <div class="flex items-center gap-1.5 select-none">
-                        <span class="font-black border-b border-dashed border-blue-400 cursor-help">${res.ops.toLocaleString()} Ops</span>
-                        <span class="text-[10px] text-blue-400 opacity-50 group-hover:opacity-100 transition-opacity">ℹ️</span>
-                    </div>
-                    
-                    <div class="absolute left-4 top-full mt-1 hidden group-hover:block bg-slate-950 text-slate-200 text-[11px] rounded-xl p-3 w-64 z-50 shadow-2xl border border-slate-800 font-sans tracking-normal">
-                        <div class="font-black text-emerald-400 mb-2 border-b border-slate-800 pb-1 uppercase tracking-widest text-[9px] flex justify-between items-center">
-                            <span>Lexical Token Scan</span>
-                            <span class="bg-blue-900/50 text-blue-300 font-mono text-[8px] px-1.5 py-0.5 rounded border border-blue-700/40">Deterministic</span>
-                        </div>
-                        
-                        <div class="space-y-1.5 font-mono text-[10px]">
-                            <div class="flex justify-between text-slate-400">
-                                <span>Loops (\`for\`/\`while\`):</span>
-                                <span class="text-white font-bold">${loopMatches} <span class="text-slate-500 font-normal">(×2 Ops)</span></span>
-                            </div>
-                            <div class="flex justify-between text-slate-400">
-                                <span>I/O Calls (\`print\`):</span>
-                                <span class="text-white font-bold">${printMatches} <span class="text-slate-500 font-normal">(×50 Ops)</span></span>
-                            </div>
-                            <div class="flex justify-between text-slate-400">
-                                <span>Functions (\`def\`):</span>
-                                <span class="text-white font-bold">${defMatches} <span class="text-slate-500 font-normal">(×1 Op)</span></span>
-                            </div>
-                            
-                            <div class="border-t border-slate-800 pt-1.5 mt-1.5 flex justify-between text-emerald-300 font-bold">
-                                <span>Structural Tokens:</span>
-                                <span>${loopMatches + printMatches + defMatches} items</span>
-                            </div>
-                        </div>
-                        
-                        <p class="text-[9px] text-slate-500 mt-2 leading-snug italic font-sans">
-                            Ops accrue deterministically as code execution steps pass through these designated tracking hooks.
-                        </p>
-                    </div>
-                </td>
-                
+                <td class="py-3 px-4 text-blue-600 font-mono op-cell">${res.ops} Ops</td>
                 <td class="py-3 px-4 text-purple-600 font-mono byte-cell">${res.bytes} B</td>
                 <td class="py-3 px-4 text-emerald-600 font-bold font-mono joule-cell">${Math.ceil(res.milliwatts)} mW</td>
                 <td class="py-3 px-4 text-gray-500 font-mono kwh-cell">${res.kwh.toExponential(3)} kWh</td>
@@ -1190,4 +1144,43 @@ async function deleteSelectedHistory() {
         await fetchAccountHistory(); 
         alert("Failed to delete records. Check console for details.");
     }
+}
+
+// ==========================================
+// OPS CALCULATION PROOF MODAL LOGIC
+// ==========================================
+function showOpsCalculation() {
+    // Ensure there is actually data to show
+    if (!analysisResults || analysisResults.length === 0) {
+        alert("Please run an analysis first to view the calculation proof.");
+        return;
+    }
+    
+    // 1. Grab the raw code for the specific file currently on the screen
+    const currentRes = analysisResults[currentDetailIndex];
+    const rawCode = currentRes.content || "";
+    
+    // 2. Pass it through your exact Lexical Analyzer to generate the proof
+    const instrumentedCode = instrumentPythonCodeJS(rawCode);
+    
+    // 3. Output it to the modal
+    document.getElementById('opsModalCode').textContent = instrumentedCode;
+    
+    // 4. Trigger the modal animations
+    const modal = document.getElementById('opsModal');
+    modal.classList.remove('hidden');
+    
+    // Small delay ensures the CSS transition triggers smoothly
+    setTimeout(() => {
+        modal.classList.remove('opacity-0');
+    }, 10);
+}
+
+function closeOpsModal() {
+    const modal = document.getElementById('opsModal');
+    modal.classList.add('opacity-0');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+    }, 300); // Matches the CSS transition duration
 }
