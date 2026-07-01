@@ -525,24 +525,48 @@ function updateLiveUI(res, currentTime) {
     const dynTotalEl = document.getElementById('dynTotal');
     const dynTimeEl = document.getElementById('dynTime');
 
+   const execution_duration = currentTime || 0.01;
+    const current_J = res.cpu_joules + res.mem_joules + (C_BASE * (1 + Math.log1p(execution_duration)));
+    const instant_mW = res.status === 'RUNNING' ? (document.getElementById('detailMilliwatts').innerText.match(/\d+/)?.[0] || BASELINE_MW) : Math.ceil(res.milliwatts);
+
+    // Update Top Summary Cards
     if (detailJoulesEl) detailJoulesEl.textContent = current_J.toFixed(6) + " J";
     if (detailOpsEl) detailOpsEl.innerText = res.ops.toLocaleString();
     
+    // Update Lower Diagnostic Trace Panels
     if (brCpuEl) brCpuEl.innerText = `${res.cpu_joules.toFixed(6)} J`;
     if (brMemEl) brMemEl.innerText = `${res.mem_joules.toFixed(6)} J`;
     if (brBaseEl) brBaseEl.innerText = `${C_BASE.toFixed(6)} J`;
 
+    // Inject Raw Metrics directly into the Manuscript Equation Framework
+    const calcOpsEl = document.getElementById('calcOps');
+    const calcBytesEl = document.getElementById('calcBytes');
+    const calcTimeEl = document.getElementById('calcTime');
+    const subCpuEl = document.getElementById('subCpu');
+    const subMemEl = document.getElementById('subMem');
+    const dynTotalMilliEl = document.getElementById('dynTotalMilli');
+    const dynPowerCalculatedEl = document.getElementById('dynPowerCalculated');
+
+    if (calcOpsEl) calcOpsEl.innerText = res.ops.toLocaleString();
+    if (calcBytesEl) calcBytesEl.innerText = res.bytes.toLocaleString();
+    if (calcTimeEl) calcTimeEl.innerText = execution_duration.toFixed(2);
+    
     if (dynCpuEl) dynCpuEl.textContent = res.cpu_joules.toFixed(6);
     if (dynMemEl) dynMemEl.textContent = res.mem_joules.toFixed(6);
+    
+    if (subCpuEl) subCpuEl.textContent = res.cpu_joules.toFixed(6) + " J";
+    if (subMemEl) subMemEl.textContent = res.mem_joules.toFixed(6) + " J";
+    
     if (dynTotalEl) dynTotalEl.textContent = current_J.toFixed(6);
-    if (dynTimeEl) dynTimeEl.textContent = (res.duration || currentTime || 0).toFixed(2) + "s";
+    if (dynTotalMilliEl) dynTotalMilliEl.textContent = current_J.toFixed(6);
+    if (dynTimeEl) dynTimeEl.textContent = execution_duration.toFixed(2) + "s";
+    if (dynPowerCalculatedEl) dynPowerCalculatedEl.textContent = instant_mW;
 
     const liveOps = res.ops || 0;
     const eeiEl = document.getElementById('dynEei');
     if (eeiEl) {
         eeiEl.textContent = liveOps > 0 ? ((current_J / liveOps) * 1000000).toFixed(4) + " μJ / Op" : "0.0000 μJ / Op";
     }
-
     const diagnostics = generateActionableDiagnostics(res);
     const issuesFound = diagnostics ? diagnostics.count : 0;
     const funFactsArray = diagnostics ? diagnostics.facts : [];
@@ -1135,7 +1159,7 @@ async function deleteSelectedHistory() {
     const tableBody = document.getElementById('dbHistoryTableBody');
     tableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center font-bold text-emerald-600 animate-pulse">Syncing deletion with Supabase...</td></tr>';
 
-  try {
+    try {
         const { error } = await supabaseClient.from('history').delete().in('id', selectedIds);
         if (error) throw error;
         await fetchAccountHistory(); 
@@ -1145,38 +1169,3 @@ async function deleteSelectedHistory() {
         alert("Failed to delete records. Check console for details.");
     }
 }
-
-// ==========================================
-// INTERACTIVE PROOF PROTOCOL (GLOBAL SCOPE)
-// ==========================================
-window.showOpsCalculation = function() {
-    if (!analysisResults || analysisResults.length === 0) {
-        alert("Please run an analysis first to view the calculation proof.");
-        return;
-    }
-    
-    // Grab the current active script data from the carousel state
-    const currentRes = analysisResults[currentDetailIndex];
-    const rawCode = currentRes.content || "";
-    
-    // Run it through the Lexical Analyzer to generate the string mapping
-    const instrumentedCode = instrumentPythonCodeJS(rawCode);
-    
-    // Push the string to the modal terminal view
-    document.getElementById('opsModalCode').textContent = instrumentedCode;
-    
-    // Display the panel interface
-    const modal = document.getElementById('opsModal');
-    modal.classList.remove('hidden');
-    setTimeout(() => {
-        modal.classList.remove('opacity-0');
-    }, 10);
-};
-
-window.closeOpsModal = function() {
-    const modal = document.getElementById('opsModal');
-    modal.classList.add('opacity-0');
-    setTimeout(() => {
-        modal.classList.add('hidden');
-    }, 300);
-};
